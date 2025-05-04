@@ -1,0 +1,7 @@
+/newevent
+/event  [event_name]*  [ confirm, delete, edit, info (default)] 
+/schedule [event_name]* [show, edit]
+/upcomingevents
+/viewresponses
+/timezone
+/remindme
