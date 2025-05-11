@@ -33,6 +33,12 @@ async def event(interaction: discord.Interaction, event_name: Optional[str] = No
 async def upcomingevents(interaction: discord.Interaction):
     await info.upcomingevents(interaction)
     
+# Slash command to delete an event
+@tree.command(name="delete", description="delete an upcoming events", guild=guild)
+@app_commands.describe(event_name="The event name you want to delete.")
+async def deteevent(interaction: discord.Interaction, event_name: Optional[str] = None):
+    await delete.delete_event(interaction, interaction.guild_id, event_name)
+    
 # ============================================================
 #                        USER COMMANDS
 # ============================================================
