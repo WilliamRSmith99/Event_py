@@ -69,7 +69,7 @@ A Discord bot that allows users to **create**, **register**, **view**, and **man
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/discord-event-bot.git
+   git clone https://github.com/WilliamRSmith99/discord-event-bot.git
    cd discord-event-bot
    ```
 
