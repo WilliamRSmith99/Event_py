@@ -14,6 +14,24 @@ TIME_SLOTS = [
 # Role names considered trusted for elevated permissions
 TRUSTED_ROLE_NAMES = ["Admin", "Moderator", "Event Organizer", "Host"]
 
+async def authenticate(user: discord.User | discord.Member, organizer_id: int) -> bool:
+    """
+    Returns True if the user is the event organizer or holds a trusted role.
+    """
+    if isinstance(user, discord.User):
+        # We need to fetch the member object to check roles
+        return user.id == organizer_id  # fallback: user match only
+    
+    # Organizer check
+    if user.id == organizer_id:
+        return True
+
+    # Trusted role check
+    for role in user.roles:
+        if role.name in TRUSTED_ROLE_NAMES:
+            return True
+
+    return False
 
 async def auth(interaction: discord.Interaction) -> bool:
     """

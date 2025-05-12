@@ -12,8 +12,8 @@
                     "702204736161710080"
                 ],
                 "slots": [
-                    "Saturday, 07/05/25",
                     "Friday, 07/04/25",
+                    "Saturday, 07/05/25",
                     "Sunday, 07/06/25"
                 ],
                 "availability": {
@@ -106,10 +106,10 @@
                     "702204736161710080"
                 ],
                 "slots": [
-                    "Saturday, 05/10/25",
+                    "Thursday, 05/15/25",
                     "Wednesday, 05/14/25",
                     "Sunday, 05/11/25",
-                    "Thursday, 05/15/25",
+                    "Saturday, 05/10/25",
                     "Monday, 05/12/25",
                     "Tuesday, 05/13/25"
                 ],
@@ -171,62 +171,6 @@
                             "702204736161710080"
                         ],
                         "05AM": []
-                    }
-                }
-            },
-            "fbgtbr": {
-                "guild_id": "1133941192187457576",
-                "event_name": "fbgtbr",
-                "description": "",
-                "organizer": 702204736161710080,
-                "organizer_cname": "will_s._.",
-                "confirmed_date": "TBD",
-                "rsvp": [],
-                "slots": [
-                    "Monday, 05/12/25",
-                    "Sunday, 05/11/25"
-                ],
-                "availability": {
-                    "Monday, 05/12/25": {
-                        "06AM": [],
-                        "05AM": [],
-                        "04AM": []
-                    },
-                    "Sunday, 05/11/25": {
-                        "06AM": [],
-                        "05AM": [],
-                        "04AM": []
-                    }
-                }
-            },
-            "bfvbhefv": {
-                "guild_id": "1133941192187457576",
-                "event_name": "bfvbhefv",
-                "description": "",
-                "organizer": 702204736161710080,
-                "organizer_cname": "will_s._.",
-                "confirmed_date": "TBD",
-                "rsvp": [
-                    "702204736161710080"
-                ],
-                "slots": [
-                    "Saturday, 05/10/25",
-                    "Sunday, 05/11/25"
-                ],
-                "availability": {
-                    "Saturday, 05/10/25": {
-                        "10AM": [],
-                        "11AM": [
-                            "702204736161710080"
-                        ],
-                        "09AM": []
-                    },
-                    "Sunday, 05/11/25": {
-                        "10AM": [
-                            "702204736161710080"
-                        ],
-                        "11AM": [],
-                        "09AM": []
                     }
                 }
             }

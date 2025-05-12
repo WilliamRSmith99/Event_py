@@ -38,7 +38,7 @@ async def upcomingevents(interaction: discord.Interaction):
     
 @tree.command(name="delete", description="Delete an upcoming event", guild=guild)
 @app_commands.describe(event_name="The event name you want to delete.")
-async def deteevent(interaction: discord.Interaction, event_name: Optional[str] = None):
+async def deleteevent(interaction: discord.Interaction, event_name: str):
     """Command to delete a specific upcoming event."""
     await delete.delete_event(interaction, interaction.guild_id, event_name)
 
