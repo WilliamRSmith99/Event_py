@@ -1,36 +1,39 @@
-from database import events, shared
 import discord
+from core import auth, events
+from commands.events import info
+from ui.views import info as infoview
+# ==========================
+#     Delete Event
+# ==========================
+
 
 async def delete_event(interaction: discord.Interaction, guild_id: int, event_name: str) -> bool:
-    events_found = events.get_events(guild_id, event_name)
+    events_found = event.get_events(guild_id, event_name)
 
-    if not events_found:
+    if len(events_found) == 0:
         await interaction.response.send_message("❌ Failure! Unable to locate event.", ephemeral=True)
         return False
 
-    if len(events_found) == 1:
-        event_name_exact, event_details = list(events_found.items())[0]
-        await _prompt_event_deletion(interaction, guild_id, event_name_exact, event_details)
-        return True
-
-    await interaction.response.send_message(
-        f"😬 Oh no! An exact match couldn't be located for `{event_name}`.\n"
-        "Did you mean one of these?",
-        ephemeral=True
-    )
-
-    for matched_name, event in events_found.items():
-        view = DeleteEventConfirmView(guild_id, matched_name, event)
-        await interaction.followup.send(
-            content=f"🗑️ **{event.event_name}** — created by <@{event.organizer}>",
-            view=view,
+    elif len(events_found) > 1:
+        await interaction.response.send_message(
+            f"😬 Oh no! An exact match couldn't be located for `{event_name}`.\n"
+            "Did you mean one of these?",
             ephemeral=True
         )
 
-    return False
+        for matched_name, event in events_found.items():
+            view = infoview.ManageEventView(event, interaction.guild.id, interaction.user)
+            await info.format_single_event(interaction, event, is_edit=False,inherit_view=view)
+
+        return False
+
+    else:
+            event_name_exact, event_details = list(events_found.items())[0]
+            await _prompt_event_deletion(interaction, guild_id, event_name_exact, event_details)
+            return True
 
 async def _prompt_event_deletion(interaction, guild_id, event_name, event_details, return_on_cancel=None):
-    if not await shared.authenticate(interaction.user, event_details.organizer):
+    if not await auth.authenticate(interaction.user, event_details.organizer):
         await interaction.response.send_message("❌ You don’t have permission to delete this event.", ephemeral=True)
         return
 
@@ -38,7 +41,7 @@ async def _prompt_event_deletion(interaction, guild_id, event_name, event_detail
         await interaction.response.defer(ephemeral=True)
 
     async def handle_yes(inter: discord.Interaction):
-        if not await shared.authenticate(inter.user, event_details.organizer):
+        if not await auth.authenticate(inter.user, event_details.organizer):
             await inter.response.send_message("❌ You don’t have permission to delete this event.", ephemeral=True)
             return
 
@@ -58,7 +61,7 @@ async def _prompt_event_deletion(interaction, guild_id, event_name, event_detail
             msg = await inter.original_response()
             await inter.followup.edit_message(msg.id, content="❌ Deletion cancelled.", view=None)
 
-    await shared.confirm_action(
+    await auth.confirm_action(
         interaction,
         f"⚠️ You are about to delete **{event_details.event_name}**.\n\nWould you like to continue?",
         on_success=handle_yes,
@@ -68,18 +71,11 @@ async def _prompt_event_deletion(interaction, guild_id, event_name, event_detail
 
     return True
 
-class DeleteEventConfirmView(discord.ui.View):
-    def __init__(self, guild_id: int, event_name: str, event_details: events.EventState):
-        super().__init__(timeout=180)
-        self.guild_id = guild_id
-        self.event_name = event_name
-        self.event_details = event_details
+# ==========================
+#        Edit Event
+# ==========================
 
-    @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger)
-    async def delete_button(self, interaction: discord.Interaction, _):
-        await _prompt_event_deletion(
-            interaction,
-            self.guild_id,
-            self.event_name,
-            self.event_details
-        )
+
+# ==========================
+#       Confirm Event
+# ==========================

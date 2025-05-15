@@ -1,10 +1,6 @@
 import discord
 from discord.ui import Button, View
-from datetime import datetime
-from database import events
-from database.events import parse_utc_availability_key
-import pytz
-
+from core import utils
 
 class OverlapSummaryButton(Button):
     def __init__(self, label: str, utc_date_key: str, utc_hour_key: str, user_count: int, row: int):
@@ -30,7 +26,7 @@ class OverlapSummaryButton(Button):
             member = interaction.guild.get_member(int(uid))
             usernames.append(member.display_name if member else f"<@{uid}>")
 
-        dt = parse_utc_availability_key(self.utc_date_key, self.utc_hour_key)
+        dt = utils.parse_utc_availability_key(self.utc_date_key, self.utc_hour_key)
         date_str = dt.strftime("%B %d")
         time_str = dt.strftime("%I:%M %p").lstrip("0")
 
@@ -40,7 +36,44 @@ class OverlapSummaryButton(Button):
             view=attendee_view
         )
 
+class ShowMoreButton(Button):
+    def __init__(self, utc_date_key: str, row: int):
+        super().__init__(
+            label="+ More",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"show_more_{utc_date_key}",
+            row=row
+        )
+        self.utc_date_key = utc_date_key
 
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.send_message(
+            f"👀 Full availability list for `{self.utc_date_key}` not yet implemented.",
+            ephemeral=True
+        )
+
+class NavButton(Button):
+    def __init__(self, parent_view, label: str, target_page: int, event, row: int, show_back_button: bool = False):
+        super().__init__(label=label, style=discord.ButtonStyle.secondary, row=row)
+        self.parent_view = parent_view
+        self.target_page = target_page
+        self.event = event
+        self.show_back_button = show_back_button
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(
+            content=f"📊 Top availability slots for **{self.event.event_name}** (page {self.target_page + 1})",
+            view=OverlapSummaryView(self.event, page=self.target_page, show_back_button=self.parent_view.show_back_button)
+        )
+
+class BackToInfoButton(Button):
+    def __init__(self, event):
+        super().__init__(label="⬅️ Back to Info", style=discord.ButtonStyle.danger, row=4)
+        self.event = event
+
+    async def callback(self, interaction: discord.Interaction):
+        from commands.events.info import format_single_event
+        await format_single_event(interaction, self.event, is_edit=True)
 class OverlapSummaryView(View):
     def __init__(self, event, page: int = 0, show_back_button: bool = False):
         super().__init__(timeout=None)
@@ -71,7 +104,7 @@ class OverlapSummaryView(View):
             ))
 
             for hour_key, users in display_slots:
-                dt = parse_utc_availability_key(utc_date_key, hour_key)
+                dt = utils.parse_utc_availability_key(utc_date_key, hour_key)
                 label = dt.strftime("%I:%M %p").lstrip("0") + f" ({len(users)})"
                 self.add_item(OverlapSummaryButton(label, utc_date_key, hour_key, len(users), row=row_idx))
 
@@ -100,49 +133,6 @@ class OverlapSummaryView(View):
                     row=nav_row
                 ))
 
-
-class ShowMoreButton(Button):
-    def __init__(self, utc_date_key: str, row: int):
-        super().__init__(
-            label="+ More",
-            style=discord.ButtonStyle.secondary,
-            custom_id=f"show_more_{utc_date_key}",
-            row=row
-        )
-        self.utc_date_key = utc_date_key
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_message(
-            f"👀 Full availability list for `{self.utc_date_key}` not yet implemented.",
-            ephemeral=True
-        )
-
-
-class NavButton(Button):
-    def __init__(self, parent_view, label: str, target_page: int, event, row: int, show_back_button: bool = False):
-        super().__init__(label=label, style=discord.ButtonStyle.secondary, row=row)
-        self.parent_view = parent_view
-        self.target_page = target_page
-        self.event = event
-        self.show_back_button = show_back_button
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.edit_message(
-            content=f"📊 Top availability slots for **{self.event.event_name}** (page {self.target_page + 1})",
-            view=OverlapSummaryView(self.event, page=self.target_page, show_back_button=self.parent_view.show_back_button)
-        )
-
-
-class BackToInfoButton(Button):
-    def __init__(self, event):
-        super().__init__(label="⬅️ Back to Info", style=discord.ButtonStyle.danger, row=4)
-        self.event = event
-
-    async def callback(self, interaction: discord.Interaction):
-        from commands.event.info import format_single_event
-        await format_single_event(interaction, self.event, is_edit=True)
-
-
 class AttendeeView(View):
     def __init__(self, original_view: OverlapSummaryView, utc_date_key: str):
         super().__init__(timeout=None)
@@ -156,22 +146,3 @@ class AttendeeView(View):
             view=OverlapSummaryView(self.original_view.event)
         )
 
-
-async def build_overlap_summary(interaction: discord.Interaction, event_name: str, guild_id: str):
-    event_matches = events.get_events(guild_id, event_name)
-    if len(event_matches) == 0:
-        return None, "❌ Event not found."
-    elif len(event_matches) == 1:
-        event = list(event_matches.values())[0]
-        view = OverlapSummaryView(event)
-        await interaction.response.send_message(f"📊 Top availability slots for **{event.event_name}**", view=view, ephemeral=True)
-    else:
-        from commands.event.info import format_single_event
-        await interaction.response.send_message(
-            f"😬 Oh no! An exact match couldn't be located for `{event_name}`.\n"
-            "Did you mean one of these?",
-            ephemeral=True
-        )
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        for event in event_matches.values():
-            await format_single_event(interaction, event, is_edit=False)

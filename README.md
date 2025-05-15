@@ -44,25 +44,38 @@ A Discord bot that allows users to **create**, **register**, **view**, and **man
 ## 📦 Project Structure
 
 ```
-.
-├── commands/
-│   ├── create_event.py
+bot.py
+README.md
+
+commands/
+├── events/                    # All user-facing event interactions
+│   ├── __init__.py
+│   ├── create.py
 │   ├── register.py
-│   ├── view_responses.py
-│   ├── event/
-│   │   ├── info.py
-│   │   ├── edit.py
-│   │   ├── confirm.py
-│   │   └── delete.py
-│   └── timezone/
-│       ├── timezone.py
-│       └── TZ.json
-├── database/
-│   ├── events.py
-│   ├── user_data.py
-│   └── shared.py
-├── bot.py
-└── README.md
+│   ├── view.py
+│   └── manage.py              # e.g. edit, confirm, delete, info
+├── timezone/
+│   ├── __init__.py
+│   ├── handlers.py
+│   └── tz_data.json
+├── __init__.py
+
+core/                          # Central app logic and utilities
+├── data/
+│   ├── events.json
+│   ├── user_data.json
+│   ├── user_timezones.json
+├── storage.py                 # Reads/writes JSON files
+├── event_state.py            # EventState dataclass & helpers
+├── user_state.py             # User timezone preferences
+├── auth.py                   # Permission/auth helper (formerly shared.py)
+├── utils.py                  # General helpers
+├── __init__.py
+
+ui/                            # Views and buttons (discord.ui components)
+├── event_views.py
+├── manage_views.py
+└── __init__.py
 ```
 
 ## ⚙️ Setup & Installation
