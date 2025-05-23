@@ -2,6 +2,25 @@ import discord
 from discord.ui import Button, View
 from core import utils
 
+async def build_overlap_summary(interaction: discord.Interaction, event_name: str, guild_id: str):
+    event_matches = event.get_events(guild_id, event_name)
+    if len(event_matches) == 0:
+        return None, "❌ Event not found."
+    elif len(event_matches) == 1:
+        event = list(event_matches.values())[0]
+        view = OverlapSummaryView(event)
+        await interaction.response.send_message(f"📊 Top availability slots for **{event.event_name}**", view=view, ephemeral=True)
+    else:
+        from commands.event.list import format_single_event
+        await interaction.response.send_message(
+            f"😬 Oh no! An exact match couldn't be located for `{event_name}`.\n"
+            "Did you mean one of these?",
+            ephemeral=True
+        )
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        for event in event_matches.values():
+            await format_single_event(interaction, event, is_edit=False)
+
 class OverlapSummaryButton(Button):
     def __init__(self, label: str, utc_date_key: str, utc_hour_key: str, user_count: int, row: int):
         super().__init__(
@@ -72,7 +91,7 @@ class BackToInfoButton(Button):
         self.event = event
 
     async def callback(self, interaction: discord.Interaction):
-        from commands.events.info import format_single_event
+        from commands.event.list import format_single_event
         await format_single_event(interaction, self.event, is_edit=True)
 class OverlapSummaryView(View):
     def __init__(self, event, page: int = 0, show_back_button: bool = False):

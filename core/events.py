@@ -2,26 +2,27 @@
 from typing import Dict, Optional, Union, Any
 from core.storage import read_json, write_json_atomic
 from dataclasses import dataclass, field
-from typing import Set, Dict, Any, Optional, Union
+from typing import Set, Dict, Any, Optional, Union, Tuple
 
 # ========== Event State Model ==========
 @dataclass
 class EventState:
     guild_id: str
     event_name: str
-    description: str
+    max_attendees: str
     organizer: str
     organizer_cname: str
     confirmed_date: str  # Format: MM/DD/YY
     rsvp: Set[str] = field(default_factory=set)
     slots: Set[str] = field(default_factory=set)
     availability: Dict[str, Dict[str, Set[str]]] = field(default_factory=dict)
+    waitlist: Dict[str, Dict[str, Dict[str,str]]] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "guild_id": self.guild_id,
             "event_name": self.event_name,
-            "description": self.description,
+            "max_attendees": self.max_attendees,
             "organizer": self.organizer,
             "organizer_cname": self.organizer_cname,
             "confirmed_date": self.confirmed_date,
@@ -31,6 +32,11 @@ class EventState:
                 date: {hour: list(users) for hour, users in hours.items()}
                 for date, hours in self.availability.items()
             },
+            "waitlist": {
+                date: {hour: {spot: user for spot, user in users.items()}
+                for hour, users in hours.items()}
+                for date, hours in self.waitlist.items()
+            },
         }
 
     @staticmethod
@@ -38,7 +44,7 @@ class EventState:
         return EventState(
             guild_id=data["guild_id"],
             event_name=data["event_name"],
-            description=data["description"],
+            max_attendees=data["max_attendees"],
             organizer=data["organizer"],
             organizer_cname=data["organizer_cname"],
             confirmed_date=data["confirmed_date"],
@@ -47,6 +53,11 @@ class EventState:
             availability={
                 date: {hour: set(users) for hour, users in hours.items()}
                 for date, hours in data.get("availability", {}).items()
+            },
+            waitlist={
+                date: {hour: {spot: user for spot, user in users.items()}
+                for hour, users in hours.items()}
+                for date, hours in data.get("waitlist", {}).items()
             },
         )
 
@@ -129,3 +140,40 @@ def delete_event(guild_id: str, event_name: str) -> bool:
     except KeyError as e:
         print(f"[delete_event] Event not found: {e}")
         return False
+
+def remove_user_from_waitlist(
+    waitlist: Dict[str, str], 
+    user_or_place: Union[str, int]
+) -> Tuple[Dict[str, str], Optional[str]]:
+    """
+    Removes a user from the waitlist by user ID or place key,
+    reindexes the waitlist keys consecutively starting from "1",
+    and returns the updated waitlist and the removed user ID.
+
+    Args:
+        waitlist: Dict[str, str] where keys are place numbers ("1", "2", ...)
+                  and values are user IDs.
+        user_or_place: The user ID to remove or the place key (as str or int).
+
+    Returns:
+        Tuple of (new_waitlist_dict, removed_user_id or None if not found).
+    """
+    removed_user = None
+    new_waitlist = {}
+    idx = 1
+
+    # Normalize user_or_place to string for keys comparison
+    place_key_str = str(user_or_place)
+
+    for key in sorted(waitlist.keys(), key=int):
+        user = waitlist[key]
+
+        # Remove either by place key or by user ID
+        if (key == place_key_str) or (user == user_or_place):
+            removed_user = user
+            continue
+
+        new_waitlist[str(idx)] = user
+        idx += 1
+
+    return new_waitlist, removed_user

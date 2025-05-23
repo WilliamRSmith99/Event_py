@@ -2,11 +2,10 @@ import discord
 from discord import app_commands
 from typing import Optional, Literal
 import os
-from commands.events import info, manage, register, responses
-from ui.views import timezone, create
-from ui import modals
+from commands.event import create, list
+from commands.event import manage, register, responses
+from commands.user import timezone
 from core import auth, user_state, utils, events
-from ui.views import info as infoview
 
 # Initialize intents and client
 intents = discord.Intents.default()
@@ -24,13 +23,13 @@ guild = discord.Object(id=1133941192187457576)
 @tree.command(name="new_event", description="Create a new event", guild=guild)
 async def new_event(interaction: discord.Interaction):
     """Command to start creating a new event."""
-    await interaction.response.send_modal(modals.NewEventModal())
+    await interaction.response.send_modal(create.NewEventModal())
     
 @tree.command(name="upcoming_events", description="View events", guild=guild)
-@app_commands.describe(event_name="Filter by event name")
-async def event(interaction: discord.Interaction, event_name: Optional[str] = None):
+@app_commands.describe(filter="Filter by event name or partial")
+async def event(interaction: discord.Interaction, filter: Optional[str] = None):
     """Command to view events, optionally filter by event name."""
-    await info.event_info(interaction, event_name)
+    await list.event_info(interaction, filter)
     
 @tree.command(name="manage_event", description="Organizer and Admin ONLY: Manage an upcoming event", guild=guild)
 @app_commands.describe(action='one of "edit", "confirm", "delete"', event_name="The event name you want to manage.")
@@ -48,8 +47,8 @@ async def manage_event(interaction: discord.Interaction, event_name: str, action
         )
         await interaction.response.defer(ephemeral=True)
         for matched_name, event in events_match.items():
-            view = infoview.ManageEventView(event, interaction.guild.id, interaction.user)
-            await info.format_single_event(interaction, event, is_edit=False,inherit_view=view)
+            view = list.ManageEventView(event, interaction.guild.id, interaction.user)
+            await list.format_single_event(interaction, event, is_edit=False,inherit_view=view)
 
         return False
 
@@ -60,7 +59,7 @@ async def manage_event(interaction: discord.Interaction, event_name: str, action
         case "confirm":
             await interaction.response.send_message("Action confirmed!")
         case "delete":
-            await info._prompt_event_deletion(interaction, interaction.guild.id, event_name_exact, event_details)
+            await list._prompt_event_deletion(interaction, interaction.guild.id, event_name_exact, event_details)
             return True
     
 

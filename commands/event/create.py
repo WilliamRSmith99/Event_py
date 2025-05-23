@@ -1,7 +1,25 @@
 import discord, uuid
+from datetime import datetime, timedelta
 from core import user_state, utils, events
 from datetime import datetime, timedelta
-from ui.views import timezone
+from commands.user import timezone
+def GenerateProposedDates(target: str = None):
+    today = datetime.now().date()
+
+    if target:
+        target_date = datetime.strptime(target, "%m/%d/%y").date()
+        if target_date < today:
+            return None
+    else:
+        target_date = today
+
+    # Start of week = Sunday
+    calendar_start = target_date - timedelta(days=(target_date.weekday() + 1) % 7)
+
+    return [
+        (calendar_start + timedelta(days=i)).strftime("%A, %m/%d/%y")
+        for i in range(14)
+    ]
 
 # ==========================
 # Button Components
@@ -111,6 +129,8 @@ class SubmitTimeButton(discord.ui.Button):
 
                 if normalized_hour_str not in self.event_data.availability.get(clean_date, {}):
                     self.event_data.availability.setdefault(clean_date, {})[normalized_hour_str] = set()
+                if normalized_hour_str not in self.event_data.waitlist.get(clean_date, {}):
+                    self.event_data.waitlist.setdefault(clean_date, {})[normalized_hour_str] = {}
 
                 # Prevent deletion of this slot
                 removed_slots.discard(normalized_hour_str)
@@ -121,10 +141,12 @@ class SubmitTimeButton(discord.ui.Button):
         # Remove any slots that are no longer selected
         for hour_to_remove in removed_slots:
             self.event_data.availability[clean_date].pop(hour_to_remove, None)
+            self.event_data.waitlist[clean_date].pop(hour_to_remove, None)
 
         # If no slots left on that date, remove the entire date entry
         if not self.event_data.availability.get(clean_date):
             self.event_data.availability.pop(clean_date, None)
+            self.event_data.waitlist.pop(clean_date, None)
 
         events.modify_event(self.event_data)
 
@@ -204,3 +226,36 @@ class ProposedTimeSelectionView(discord.ui.View):
         for item in self.children:
             item.disabled = True
         await self.interaction.edit_original_response(view=self)
+
+class NewEventModal(discord.ui.Modal, title="Create a new event"):
+    event_name_input = discord.ui.TextInput(label="Event Name:", placeholder="Event Name MUST be unique.")
+    max_attendees_input = discord.ui.TextInput(label="Maximum Number of Attendees:", required=True, placeholder="0")
+    target_date_input = discord.ui.TextInput(label="Target Date: (MM/DD/YY)", required=False, placeholder="Optional: Default is today")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        slots = GenerateProposedDates(self.target_date_input.value)
+
+        if slots is None:
+            await interaction.response.send_message(
+                "🌀 **Nice try, time traveler!** You can't plan events in the past.\nTry again with a future date. ⏳",
+                ephemeral=True
+            )
+            return
+
+        event_data = events.EventState(
+            guild_id=str(interaction.guild_id),
+            event_name=self.event_name_input.value,
+            max_attendees=self.max_attendees_input.value,
+            organizer=interaction.user.id,
+            organizer_cname=interaction.user.name,
+            confirmed_date="TBD",
+            slots=slots,
+            availability={},
+            rsvp=set()
+        )
+
+        await interaction.response.send_message(
+            f"📅 Creating event: **{self.event_name_input.value}**\n{interaction.user.mention}\n🕐 Suggested Dates:",
+            view=ProposedDateSelectionView(interaction, event_data),
+            ephemeral=True
+        )
