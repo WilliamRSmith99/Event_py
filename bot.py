@@ -2,14 +2,17 @@ import discord
 from discord import app_commands
 from typing import Optional, Literal
 import os
-from commands.event import create, list
-from commands.event import manage, register, responses
+from commands.configs import settings
+from commands.event import manage, register, responses, create, list
 from commands.user import timezone
 from core import auth, user_state, utils, events
 
 # Initialize intents and client
 intents = discord.Intents.default()
 intents.members = True
+intents.guilds = True
+intents.guild_messages = True
+intents.message_content = True
 client = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(client)
 
@@ -77,6 +80,10 @@ async def schedule(interaction: discord.Interaction, event_name: str):
 # ============================================================
 #                        USER COMMANDS
 # ============================================================
+
+@tree.command(name="settings", description="Configure server-wide settings", guild=guild)
+async def configure_bot(interaction: discord.Interaction):
+    await settings.PaginatedSettingsContext(interaction=interaction, guild_id=interaction.guild_id,)
 
 @tree.command(name="timezone", description="Set and view your current timezone", guild=guild)
 async def viewtimezone(interaction: discord.Interaction):

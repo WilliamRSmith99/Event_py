@@ -73,7 +73,7 @@ async def _prompt_event_deletion(interaction, guild_id, event_name, event_detail
 
     async def handle_no(inter: discord.Interaction):
         if return_on_cancel:
-            await return_on_cancel(inter, event_details)
+            await return_on_cancel
         else:
             msg = await inter.original_response()
             await inter.followup.edit_message(msg.id, content="❌ Deletion cancelled.", view=None)

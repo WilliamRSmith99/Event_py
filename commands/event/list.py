@@ -7,8 +7,6 @@ import discord
 
 # --- Event Rendering ---
 
-async def manage_event_context(interaction: discord.Interaction, event_details: events.EventState):
-    await format_single_event(interaction, event_details)
 
 async def format_single_event(interaction, event, is_edit=False, inherit_view=None):
     user_tz = user_state.get_user_timezone(interaction.user.id)
@@ -128,12 +126,10 @@ class ManageEventButton(Button):
             return
 
         view = ManageEventView(self.event, interaction.guild.id, interaction.user)
-        msg = await interaction.followup.send(
-            content="🔧 Manage your event below:",
-            ephemeral=True,
+        await interaction.response.edit_message(
             view=view
         )
-        view.message = msg
+        view.message = interaction.message
 
 # --- View Definitions ---
 
@@ -166,8 +162,8 @@ class ManageEventView(utils.ExpiringView):
         if await auth.authenticate(self.user, self.event.organizer):
             view.add_item(ManageEventButton(self.event))
 
-        msg = await interaction.followup.send(content="✅ Back to event view:", ephemeral=True, view=view)
-        view.message = msg
+        await interaction.response.edit_message(view=view)
+        view.message = interaction.message
 
     @discord.ui.button(label="Edit Event", style=discord.ButtonStyle.primary)
     async def edit_button(self, interaction: discord.Interaction, _):
@@ -188,5 +184,5 @@ class ManageEventView(utils.ExpiringView):
             self.guild_id,
             self.event.event_name,
             self.event_details,
-            return_on_cancel=list.manage_event_context
+            return_on_cancel=format_single_event(interaction, self.event_details)
         )
