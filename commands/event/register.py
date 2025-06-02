@@ -17,15 +17,14 @@ async def schedule_command(interaction: discord.Interaction, event_name: str):
 
     event = list(matches.values())[0]
     if not event or not event.availability:
-        await utils.safe_respond(interaction, f"📅 No time slots have been proposed for **{event.event_name}** yet.", ephemeral=True)
+        await utils.safe_send(interaction, f"📅 No time slots have been proposed for **{event.event_name}** yet.")
         return
 
     user_tz_str = user_state.get_user_timezone(interaction.user.id)
     if not user_tz_str:
-        await utils.safe_respond(
+        await utils.safe_send(
             interaction,
             "❌ Please set your timezone using `/settimezone` first!",
-            ephemeral=True,
             view=timezone.RegionSelectView(interaction.user.id)
         )
         return
@@ -33,10 +32,9 @@ async def schedule_command(interaction: discord.Interaction, event_name: str):
     try:
         user_tz = pytz.timezone(user_tz_str)
     except pytz.UnknownTimeZoneError:
-        await utils.safe_respond(
+        await utils.safe_send(
             interaction,
-            f"❌ Invalid timezone stored: {user_tz_str}. Please reset it using `/settimezone`.",
-            ephemeral=True
+            f"❌ Invalid timezone stored: {user_tz_str}. Please reset it using `/settimezone`."
         )
         return
 
@@ -50,10 +48,9 @@ async def schedule_command(interaction: discord.Interaction, event_name: str):
                 local_slots_by_date[local_dt.date()].append((local_dt, utc_date_key, utc_hour_key))
 
     if not local_slots_by_date:
-        await utils.safe_respond(
+        await utils.safe_send(
             interaction,
-            f"📅 No time slots available for **{event.event_name}**.",
-            ephemeral=True
+            f"📅 No time slots available for **{event.event_name}**."
         )
         return
 
@@ -68,7 +65,7 @@ async def schedule_command(interaction: discord.Interaction, event_name: str):
             await interaction.response.send_message(content=view.render_date_label(), view=view, ephemeral=True)
     except discord.HTTPException as e:
         await interaction.followup.send(f"❌ Failed to display schedule view: {str(e)}", ephemeral=True)
-
+        
 def user_has_any_availability_or_waitlist(user_id: str, availability: dict, waitlist: dict) -> bool:
     # Check availability
     for hour_map in availability.values():
@@ -96,6 +93,7 @@ class PaginatedHourSelectionView(View):
         self.page = 0
         self.selected_utc_keys = set()
 
+        # Pre-select slots that the user has already chosen
         for date_slots in self.slots_by_date:
             for _, date_key, hour_key in date_slots:
                 if user_id in event.availability.get(date_key, {}).get(hour_key, []) or user_id in event.waitlist.get(date_key, {}).get(hour_key, {}).values():
@@ -169,30 +167,25 @@ class SubmitAllButton(Button):
                 
                 if len(user_list) < max_attendees:
                     user_list.add(view.user_id)
-                    print(user_list)
                     changed = True
                 else:
                     wait_list[str(len(wait_list)+1)] = view.user_id
                     changed = True
-
 
         # Remove unselected
         for date_key, hour_dict in view.event.availability.items():
             for hour_key, user_list in hour_dict.items():
                 wait_list = view.event.waitlist.get(date_key, {}).get(hour_key, {})
                 if (date_key, hour_key) not in selected and view.user_id in user_list:
-                    print("removed")
                     user_list.remove(view.user_id)
                     changed = True
 
                     # Promote first user from waitlist if any
                     if wait_list:
-                        # Remove first user from waitlist and get them
                         updated_waitlist, promoted_user = events.emove_user_from_waitlist(wait_list, "1")
                         view.event.waitlist[date_key][hour_key] = updated_waitlist
 
                         if promoted_user:
-                            # Add promoted user to availability
                             user_list.add(promoted_user)
                             changed = True
                 elif (date_key, hour_key) not in selected and view.user_id in wait_list.values():

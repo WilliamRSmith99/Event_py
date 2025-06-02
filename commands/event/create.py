@@ -70,10 +70,19 @@ class SubmitDateButton(discord.ui.Button):
 
         # Update slots to reflect new selection
         self.event_data.slots = list(new_selected_dates)
-        first_date = self.event_data.slots[0]
+        
+        try:
+            sorted_dates = sorted(
+                self.event_data.slots,
+                key=lambda d: datetime.strptime(d, "%A, %m/%d/%y")
+            )
+        except ValueError:
+            sorted_dates = sorted(self.event_data.slots)
+        self.event_data.slots = sorted_dates
+        first_date = sorted_dates[0]
 
         await interaction.response.edit_message(
-            content=f"🕐 **Select Times for {self.event_data.event_name} on 📍 {first_date}:**",
+            content=f"🕐 **Select Times for {self.event_data.event_name} on {first_date}:**",
             view=ProposedTimeSelectionView(interaction, self.event_data, first_date)
         )
 
@@ -106,50 +115,22 @@ class SubmitTimeButton(discord.ui.Button):
         if not user_tz:
             await utils.safe_send(
                 interaction,
-                "❌ Oh no! We can't find your timezone. Select your timezone to register new events:",
+                "❌ Oh no! We can't find your timezone. Select your timezone to register new events: ",
                 view=timezone.RegionSelectView(interaction.user.id)
             )
             return
 
-        clean_date = self.date.split("📍")[1].strip() if "📍" in self.date else self.date
-
-        # Normalize selected slots into UTC and compare with what's already in availability
-        current_slots = self.event_data.availability.get(clean_date, {}).keys()
-        new_slots = set()
-        removed_slots = set(current_slots)
-
         for hour_label in self.parent_view.selected_slots:
             try:
-                datetime_str = f"{clean_date} at {hour_label}"
+                datetime_str = f"{self.date} at {hour_label}"
                 utc_iso = utils.to_utc_isoformat(datetime_str, user_tz)
-                utc_dt = datetime.fromisoformat(utc_iso)
-                normalized_hour_str = utc_dt.strftime("%I%p")
-
-                new_slots.add(normalized_hour_str)
-
-                if normalized_hour_str not in self.event_data.availability.get(clean_date, {}):
-                    self.event_data.availability.setdefault(clean_date, {})[normalized_hour_str] = set()
-                if normalized_hour_str not in self.event_data.waitlist.get(clean_date, {}):
-                    self.event_data.waitlist.setdefault(clean_date, {})[normalized_hour_str] = {}
-
-                # Prevent deletion of this slot
-                removed_slots.discard(normalized_hour_str)
+                self.event_data.availability[utc_iso] = {}
 
             except Exception as e:
                 print(f"Failed to parse {datetime_str}: {e}")
 
-        # Remove any slots that are no longer selected
-        for hour_to_remove in removed_slots:
-            self.event_data.availability[clean_date].pop(hour_to_remove, None)
-            self.event_data.waitlist[clean_date].pop(hour_to_remove, None)
-
-        # If no slots left on that date, remove the entire date entry
-        if not self.event_data.availability.get(clean_date):
-            self.event_data.availability.pop(clean_date, None)
-            self.event_data.waitlist.pop(clean_date, None)
-
         events.modify_event(self.event_data)
-
+        
         remaining_dates = list(self.event_data.slots)
         current_index = remaining_dates.index(self.date)
 
@@ -234,7 +215,6 @@ class NewEventModal(discord.ui.Modal, title="Create a new event"):
 
     async def on_submit(self, interaction: discord.Interaction):
         slots = GenerateProposedDates(self.target_date_input.value)
-
         if slots is None:
             await interaction.response.send_message(
                 "🌀 **Nice try, time traveler!** You can't plan events in the past.\nTry again with a future date. ⏳",

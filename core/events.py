@@ -1,10 +1,10 @@
-
 from typing import Dict, Optional, Union, Any
 from core.storage import read_json, write_json_atomic
 from dataclasses import dataclass, field
 from typing import Set, Dict, Any, Optional, Union, Tuple
 
 # ========== Event State Model ==========
+
 @dataclass
 class EventState:
     guild_id: str
@@ -12,11 +12,14 @@ class EventState:
     max_attendees: str
     organizer: str
     organizer_cname: str
-    confirmed_date: str  # Format: MM/DD/YY
+    confirmed_date: str
+    bulletin_channel_id: Optional[int] = None
+    bulletin_message_id: Optional[int] = None
+    bulletin_thread_id: Optional[int] = None
     rsvp: Set[str] = field(default_factory=set)
     slots: Set[str] = field(default_factory=set)
-    availability: Dict[str, Dict[str, Set[str]]] = field(default_factory=dict)
-    waitlist: Dict[str, Dict[str, Dict[str,str]]] = field(default_factory=dict)
+    availability: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    waitlist: Dict[str, Dict[str, str]] = field(default_factory=dict)  
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -26,17 +29,12 @@ class EventState:
             "organizer": self.organizer,
             "organizer_cname": self.organizer_cname,
             "confirmed_date": self.confirmed_date,
+            "bulletin_channel_id": self.bulletin_channel_id,
+            "bulletin_message_id": self.bulletin_message_id,
+            "bulletin_thread_id": self.bulletin_thread_id,
             "rsvp": list(self.rsvp),
             "slots": list(self.slots),
-            "availability": {
-                date: {hour: list(users) for hour, users in hours.items()}
-                for date, hours in self.availability.items()
-            },
-            "waitlist": {
-                date: {hour: {spot: user for spot, user in users.items()}
-                for hour, users in hours.items()}
-                for date, hours in self.waitlist.items()
-            },
+            "availability": {iso: {spot: user for spot, user in spots.items()} for iso, spots in self.availability.items()},
         }
 
     @staticmethod
@@ -48,21 +46,17 @@ class EventState:
             organizer=data["organizer"],
             organizer_cname=data["organizer_cname"],
             confirmed_date=data["confirmed_date"],
+            bulletin_channel_id=data.get("bulletin_channel_id"),
+            bulletin_message_id=data.get("bulletin_message_id"),
+            bulletin_thread_id=data.get("bulletin_thread_id"),
             rsvp=set(data.get("rsvp", [])),
             slots=set(data.get("slots", [])),
-            availability={
-                date: {hour: set(users) for hour, users in hours.items()}
-                for date, hours in data.get("availability", {}).items()
-            },
-            waitlist={
-                date: {hour: {spot: user for spot, user in users.items()}
-                for hour, users in hours.items()}
-                for date, hours in data.get("waitlist", {}).items()
-            },
+            availability={iso: {spot: user for spot, user in spots.items()} for iso, spots in data.get("availability", {}).items()},
         )
 
 
 DATA_FILE_NAME = "events.json"
+
 # ========== In-Memory Store ==========
 
 def load_events() -> Dict[str, Dict[str, Dict[str, Union[EventState, Any]]]]:
@@ -92,6 +86,7 @@ def save_events(data: Dict[str, Dict[str, Dict[str, EventState]]]) -> None:
     }
 
     write_json_atomic(DATA_FILE_NAME, to_save)
+
 # ========== CRUD ==========
 
 def get_event(guild_id: int, event_name: str) -> Optional[EventState]:
@@ -151,7 +146,7 @@ def remove_user_from_waitlist(
     and returns the updated waitlist and the removed user ID.
 
     Args:
-        waitlist: Dict[str, str] where keys are place numbers ("1", "2", ...)
+        waitlist: Dict[str, str] where keys are place numbers ("1", "2", ...),
                   and values are user IDs.
         user_or_place: The user ID to remove or the place key (as str or int).
 

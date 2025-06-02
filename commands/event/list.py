@@ -1,12 +1,51 @@
 from discord.ui import Button
-from datetime import datetime
+from collections import defaultdict
+from datetime import datetime, timedelta
 from commands.user import timezone
 from core import auth, events, user_state,utils
 from commands.event import register, responses, manage
 import discord
 
 # --- Event Rendering ---
+def create_output(availability, grouped_times):
+    output = []
+    
+    for date, group in grouped_times.items():
+        group = sorted(group, key=lambda x: datetime.fromisoformat(x[0]))
+        merged_time_range = []
+        max_rsvps = 0
+        current_start = datetime.fromisoformat(group[0][0])
+        current_end = datetime.fromisoformat(group[0][1])
 
+        for start_time, end_time in group:
+            start_time = datetime.fromisoformat(start_time)
+            end_time = datetime.fromisoformat(end_time)
+
+            if start_time <= current_end + timedelta(hours=1):
+                current_end = max(current_end, end_time)
+                max_rsvps = max(max_rsvps, len(set(user for user in availability.get(start_time.isoformat(), []))))
+            else:
+                merged_time_range.append(f"`{current_start.strftime('%I%p').lower()} -> {current_end.strftime('%I%p').lower()}`")
+                current_start = start_time
+                current_end = end_time
+
+        merged_time_range.append(f"`{current_start.strftime('%I%p').lower()} -> {current_end.strftime('%I%p').lower()}`")
+        time_range = " & ".join(merged_time_range)
+        date_str = current_start.strftime("%A, %m/%d/%y")
+        output.append(f"{date_str} {time_range} (RSVPs: {max_rsvps})")
+
+    return output
+
+
+def group_consecutive_hours(availability):
+    times = sorted(availability.keys())
+    grouped_times = defaultdict(list)
+
+    for time in times:
+        date_key = time.split("T")[0]  
+        grouped_times[date_key].append((time, time)) 
+    
+    return create_output(availability, grouped_times)
 
 async def format_single_event(interaction, event, is_edit=False, inherit_view=None):
     user_tz = user_state.get_user_timezone(interaction.user.id)
@@ -21,14 +60,7 @@ async def format_single_event(interaction, event, is_edit=False, inherit_view=No
         view.message = msg
         return
 
-    local_dates = set()
-    for date_str, hours in event.availability.items():
-        for hour in hours:
-            utc_key = f"{date_str} at {hour}"
-            local_date = datetime.fromisoformat(utils.from_utc_to_local(utc_key, user_tz)).strftime("%A, %m/%d/%y")
-            local_dates.add(local_date)
-
-    proposed_dates = "\n".join(f"• {d}" for d in sorted(local_dates))
+    proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours(event.availability))
     body = (
         f"📅 **Event:** `{event.event_name}`\n"
         f"🙋 **Organizer:** <@{event.organizer}>\n"

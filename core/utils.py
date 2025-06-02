@@ -9,9 +9,13 @@ def to_utc_isoformat(datetime_str: str, user_timezone: str) -> str:
     Convert a local user time string to UTC ISO format.
     """
     local_tz = pytz.timezone(user_timezone)
-    naive = datetime.strptime(datetime_str, "%A, %m/%d/%y at %I%p")
-    localized = local_tz.localize(naive)
-    return localized.astimezone(pytz.utc).isoformat()
+    try:
+        naive = datetime.strptime(datetime_str, "%A, %m/%d/%y at %I%p")
+        localized = local_tz.localize(naive)
+        return localized.astimezone(pytz.utc).isoformat()  # Convert to UTC and return ISO format
+    except Exception as e:
+        print(f"Error in to_utc_isoformat: {e}")
+        return datetime_str  # Return the original string if an error occurs
 
 
 def from_utc_to_local(utc_date_str: str, user_timezone: str) -> str:
@@ -19,10 +23,11 @@ def from_utc_to_local(utc_date_str: str, user_timezone: str) -> str:
     Convert a UTC time string to a user's local time in ISO format.
     """
     try:
-        naive_utc = datetime.strptime(utc_date_str, "%A, %m/%d/%y at %I%p")
+        # The UTC string format needs to match "%A, %m/%d/%y at %I%p"
+        naive_utc = datetime.fromisoformat(utc_date_str)
         user_tz = pytz.timezone(user_timezone)
-        normalized = pytz.utc.localize(naive_utc)
-        return normalized.astimezone(user_tz).isoformat()
+        local_time = naive_utc.astimezone(user_tz)
+        return local_time
     except Exception as e:
         print(f"[from_utc_to_local] Error: {e}")
         return utc_date_str
@@ -39,6 +44,19 @@ def parse_utc_availability_key(utc_date_str: str, utc_hour_str: str) -> Optional
     except ValueError as e:
         print(f"[parse_utc_availability_key] Invalid datetime: {combined} - {e}")
         return None
+
+def to_discord_timestamp(dt: datetime, style: str = 't') -> str:
+    """
+    Convert a datetime object to a Discord-formatted timestamp string.
+    :param dt: naive or aware datetime object (UTC assumed if naive).
+    :param style: Discord timestamp style: t, T, d, D, f, F, R
+    :return: string like <t:1629072000:t>
+    """
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    unix_ts = int(dt.timestamp())
+    return f"<t:{unix_ts}:{style}>"
         
 def get_timezone_groups():
     """Group and return timezones by their region."""
