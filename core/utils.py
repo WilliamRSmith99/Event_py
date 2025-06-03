@@ -1,6 +1,6 @@
 import pytz, discord
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from core import storage
 from collections import defaultdict
 
