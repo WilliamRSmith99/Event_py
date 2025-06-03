@@ -29,23 +29,7 @@ async def schedule_command(interaction: discord.Interaction, event_name: str):
         )
         return
 
-    try:
-        user_tz = pytz.timezone(user_tz_str)
-    except pytz.UnknownTimeZoneError:
-        await utils.safe_send(
-            interaction,
-            f"❌ Invalid timezone stored: {user_tz_str}. Please reset it using `/settimezone`."
-        )
-        return
-
-    local_slots_by_date = defaultdict(list)
-
-    for utc_date_key, hours in event.availability.items():
-        for utc_hour_key in hours:
-            utc_dt = utils.parse_utc_availability_key(utc_date_key, utc_hour_key)
-            if utc_dt:
-                local_dt = utc_dt.astimezone(user_tz)
-                local_slots_by_date[local_dt.date()].append((local_dt, utc_date_key, utc_hour_key))
+    local_slots_by_date = utils.from_utc_to_local(event.availability, user_tz_str)
 
     if not local_slots_by_date:
         await utils.safe_send(
@@ -54,9 +38,7 @@ async def schedule_command(interaction: discord.Interaction, event_name: str):
         )
         return
 
-    sorted_dates = sorted(local_slots_by_date.keys())
-    slots_by_date = [sorted(local_slots_by_date[d], key=lambda x: x[0]) for d in sorted_dates]
-    view = PaginatedHourSelectionView(event, sorted_dates, slots_by_date, str(interaction.user.id))
+    view = PaginatedHourSelectionView(event, local_slots_by_date, str(interaction.user.id))
 
     try:
         if interaction.type.name == "component":
@@ -64,46 +46,38 @@ async def schedule_command(interaction: discord.Interaction, event_name: str):
         else:
             await interaction.response.send_message(content=view.render_date_label(), view=view, ephemeral=True)
     except discord.HTTPException as e:
-        await interaction.followup.send(f"❌ Failed to display schedule view: {str(e)}", ephemeral=True)
-        
-def user_has_any_availability_or_waitlist(user_id: str, availability: dict, waitlist: dict) -> bool:
-    # Check availability
-    for hour_map in availability.values():
-        for user_list in hour_map.values():
-            if user_id in user_list:
-                return True
-
-    # Check waitlist
-    for hour_map in waitlist.values():
-        for waitlist_dict in hour_map.values():
-            if user_id in waitlist_dict.values():
-                return True
-
-    return False
-
+        await interaction.followup.send(f"❌ Failed to display schedule view: {str(e)}", ephemeral=True)    
 
 class PaginatedHourSelectionView(View):
-    def __init__(self, event, date_objs, slots_data_by_date, user_id):
+    def __init__(self, event, slots_data_by_date, user_id):
         super().__init__(timeout=900)
         self.event = event
-        self.date_objs = date_objs
-        self.slots_by_date = slots_data_by_date
         self.user_id = user_id
-        self.current_date_index = 0
         self.page = 0
+        self.current_date_index = 0
         self.selected_utc_keys = set()
 
-        # Pre-select slots that the user has already chosen
-        for date_slots in self.slots_by_date:
-            for _, date_key, hour_key in date_slots:
-                if user_id in event.availability.get(date_key, {}).get(hour_key, []) or user_id in event.waitlist.get(date_key, {}).get(hour_key, {}).values():
-                    self.selected_utc_keys.add((date_key, hour_key))
+        self.date_objs = [] 
+        self.slots_by_date = []
+
+        for date_label, slots in slots_data_by_date:
+            processed_slots = []
+            for local_dt, utc_iso_str, users in slots:
+                date_key = local_dt.strftime("%A, %m/%d/%y")
+                hour_key = local_dt.strftime("%-I %p")
+                processed_slots.append((utc_iso_str, local_dt, date_key, hour_key, users))
+
+                if user_id in users.values():
+                    self.selected_utc_keys.add((utc_iso_str, date_key, hour_key))
+
+            self.date_objs.append(date_label)
+            self.slots_by_date.append(processed_slots)
 
         self.render_buttons()
 
     def render_date_label(self):
-        date = self.date_objs[self.current_date_index]
-        return f"📅 **{date.strftime('%A, %B %d, %Y')} (Your Time)**"
+        date_label = self.date_objs[self.current_date_index]
+        return f"📅 **{date_label} (Your Time)**"
 
     def render_buttons(self):
         self.clear_items()
@@ -111,10 +85,28 @@ class PaginatedHourSelectionView(View):
         start = self.page * MAX_TIME_BUTTONS
         end = start + MAX_TIME_BUTTONS
 
-        for local_dt, date_key, hour_key in slots[start:end]:
-            selected = (date_key, hour_key) in self.selected_utc_keys
-            count = len(self.event.availability.get(date_key, {}).get(hour_key, []))
-            self.add_item(LocalizedHourToggleButton(local_dt, date_key, hour_key, selected, count))
+        for utc_iso_str, local_dt, date_key, hour_key, users in slots[start:end]:
+            selected = (utc_iso_str, date_key, hour_key) in self.selected_utc_keys
+            count = len(users)
+            self.add_item(LocalizedHourToggleButton(utc_iso_str, local_dt, date_key, hour_key, selected, count))
+
+        total_pages = (len(slots) - 1) // MAX_TIME_BUTTONS
+
+        # Navigation row
+        self.add_item(NavButton("⬅️ Prev Date", "prev_date", disabled=self.current_date_index == 0))
+        self.add_item(NavButton("⬅️ Earlier Times", "earlier", disabled=self.page == 0))
+        self.add_item(SubmitAllButton())
+        self.add_item(NavButton("Later Times ➡️", "later", disabled=self.page >= total_pages))
+        self.add_item(NavButton("Next Date ➡️", "next_date", disabled=self.current_date_index >= len(self.date_objs) - 1))
+        self.clear_items()
+        slots = self.slots_by_date[self.current_date_index]
+        start = self.page * MAX_TIME_BUTTONS
+        end = start + MAX_TIME_BUTTONS
+
+        for utc_iso_str, local_dt, date_key, hour_key, users in slots[start:end]:
+            selected = (utc_iso_str, date_key, hour_key) in self.selected_utc_keys
+            count = len(users)
+            self.add_item(LocalizedHourToggleButton(utc_iso_str, local_dt, date_key, hour_key, selected, count))
 
         total_pages = (len(slots) - 1) // MAX_TIME_BUTTONS
 
@@ -127,18 +119,18 @@ class PaginatedHourSelectionView(View):
 
 
 class LocalizedHourToggleButton(Button):
-    def __init__(self, local_dt, date_key, hour_key, is_selected, attendee_count):
+    def __init__(self, utc_iso_str, local_dt, date_key, hour_key, is_selected, attendee_count):
+        self.utc_iso_str  = utc_iso_str
         self.utc_date_key = date_key
         self.utc_hour_key = hour_key
-        time_str = local_dt.strftime("%I:%M %p").lstrip("0")
-        label = f"{time_str}  [👥 {attendee_count}]" if attendee_count else time_str
+        label = f"{hour_key}  [👥 {attendee_count}]" if attendee_count else hour_key
         style = ButtonStyle.success if is_selected else ButtonStyle.secondary
 
         super().__init__(label=label, style=style, custom_id=f"toggle_{date_key}_{hour_key}")
 
     async def callback(self, interaction):
         view: PaginatedHourSelectionView = self.view
-        key = (self.utc_date_key, self.utc_hour_key)
+        key = (self.utc_iso_str, self.utc_date_key, self.utc_hour_key)
         if key in view.selected_utc_keys:
             view.selected_utc_keys.remove(key)
             self.style = ButtonStyle.secondary
@@ -159,41 +151,21 @@ class SubmitAllButton(Button):
         changed = False
 
         selected = view.selected_utc_keys.copy()
-        for date_key, hour_key in selected:
-            user_list = view.event.availability.get(date_key, {}).get(hour_key, set())
-            wait_list = view.event.waitlist.get(date_key, {}).get(hour_key, {})
-            max_attendees = int(view.event.max_attendees)
-            if view.user_id not in user_list and view.user_id not in wait_list.values():
-                
-                if len(user_list) < max_attendees:
-                    user_list.add(view.user_id)
-                    changed = True
-                else:
-                    wait_list[str(len(wait_list)+1)] = view.user_id
-                    changed = True
+        selected_utc_iso_strs = [iso_str for iso_str, _, _ in selected]
+        for utc_iso_str in selected_utc_iso_strs:
+            user_list = view.event.availability.get(utc_iso_str, {})
+            if view.user_id not in user_list.values():
+                next_position = str(len(user_list) + 1) 
+                view.event.availability[utc_iso_str][next_position] = view.user_id
+                changed = True
+         
+        for utc_iso_str, user_dict in view.event.availability.items():
+            if utc_iso_str not in selected_utc_iso_strs and view.user_id in user_list.values():
+                updated_queue = events.remove_user_from_queue(user_dict, view.user_id)
+                view.event.availability[utc_iso_str] = updated_queue
+                changed = True
 
-        # Remove unselected
-        for date_key, hour_dict in view.event.availability.items():
-            for hour_key, user_list in hour_dict.items():
-                wait_list = view.event.waitlist.get(date_key, {}).get(hour_key, {})
-                if (date_key, hour_key) not in selected and view.user_id in user_list:
-                    user_list.remove(view.user_id)
-                    changed = True
-
-                    # Promote first user from waitlist if any
-                    if wait_list:
-                        updated_waitlist, promoted_user = events.emove_user_from_waitlist(wait_list, "1")
-                        view.event.waitlist[date_key][hour_key] = updated_waitlist
-
-                        if promoted_user:
-                            user_list.add(promoted_user)
-                            changed = True
-                elif (date_key, hour_key) not in selected and view.user_id in wait_list.values():
-                    updated_waitlist, removed_user = events.remove_user_from_waitlist(wait_list, view.user_id)
-                    view.event.waitlist[date_key][hour_key] = updated_waitlist
-                    changed = True
-
-        if user_has_any_availability_or_waitlist(view.user_id, view.event.availability,view.event.waitlist):
+        if events.user_has_any_availability(view.user_id, view.event.availability):
             view.event.rsvp.add(view.user_id)
         else:
             view.event.rsvp.discard(view.user_id)

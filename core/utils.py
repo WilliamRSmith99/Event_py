@@ -2,6 +2,7 @@ import pytz, discord
 from typing import Optional
 from datetime import datetime
 from core import storage
+from collections import defaultdict
 
 # ========== Time Conversion Utilities ==========
 def to_utc_isoformat(datetime_str: str, user_timezone: str) -> str:
@@ -18,20 +19,38 @@ def to_utc_isoformat(datetime_str: str, user_timezone: str) -> str:
         return datetime_str  # Return the original string if an error occurs
 
 
-def from_utc_to_local(utc_date_str: str, user_timezone: str) -> str:
-    """
-    Convert a UTC time string to a user's local time in ISO format.
-    """
-    try:
-        # The UTC string format needs to match "%A, %m/%d/%y at %I%p"
-        naive_utc = datetime.fromisoformat(utc_date_str)
-        user_tz = pytz.timezone(user_timezone)
-        local_time = naive_utc.astimezone(user_tz)
-        return local_time
-    except Exception as e:
-        print(f"[from_utc_to_local] Error: {e}")
-        return utc_date_str
+from collections import defaultdict
+from datetime import datetime
+import pytz
 
+def from_utc_to_local(availability, user_timezone: str) -> list:
+    """
+    Convert UTC time strings to user's local time, grouped and sorted by local date.
+    
+    Returns a list of (date_str, slots) tuples, sorted chronologically.
+    Each slot is a tuple: (original_utc, local_date, users)
+    """
+    grouped = defaultdict(list)
+    user_tz = pytz.timezone(user_timezone)
+
+    for utc_time_str, users in availability.items():
+        utc_dt = datetime.fromisoformat(utc_time_str)  # naive or UTC-aware
+        if utc_dt.tzinfo is None:
+            utc_dt = pytz.utc.localize(utc_dt)
+
+        local_dt = utc_dt.astimezone(user_tz)
+        date_key = local_dt.strftime("%A, %m/%d/%y")
+
+        # Store (local datetime object, original UTC ISO string, users)
+        grouped[date_key].append((local_dt, utc_time_str, users))
+
+    # Sort by actual date (using local_dt)
+    sorted_output = []
+    for date_key in sorted(grouped.keys(), key=lambda d: datetime.strptime(d, "%A, %m/%d/%y")):
+        day_slots = sorted(grouped[date_key], key=lambda x: x[0])  # sort by local_dt
+        sorted_output.append((date_key, day_slots))
+
+    return sorted_output
 
 def parse_utc_availability_key(utc_date_str: str, utc_hour_str: str) -> Optional[datetime]:
     """

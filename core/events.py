@@ -136,39 +136,13 @@ def delete_event(guild_id: str, event_name: str) -> bool:
         print(f"[delete_event] Event not found: {e}")
         return False
 
-def remove_user_from_waitlist(
-    waitlist: Dict[str, str], 
-    user_or_place: Union[str, int]
-) -> Tuple[Dict[str, str], Optional[str]]:
-    """
-    Removes a user from the waitlist by user ID or place key,
-    reindexes the waitlist keys consecutively starting from "1",
-    and returns the updated waitlist and the removed user ID.
+def remove_user_from_queue(queue: dict, user_id: str) -> dict:
+    return {str(i + 1): v for i, (k, v) in enumerate(
+        (item for item in sorted(queue.items(), key=lambda x: int(x[0])) if item[1] != user_id)
+    )}
 
-    Args:
-        waitlist: Dict[str, str] where keys are place numbers ("1", "2", ...),
-                  and values are user IDs.
-        user_or_place: The user ID to remove or the place key (as str or int).
-
-    Returns:
-        Tuple of (new_waitlist_dict, removed_user_id or None if not found).
-    """
-    removed_user = None
-    new_waitlist = {}
-    idx = 1
-
-    # Normalize user_or_place to string for keys comparison
-    place_key_str = str(user_or_place)
-
-    for key in sorted(waitlist.keys(), key=int):
-        user = waitlist[key]
-
-        # Remove either by place key or by user ID
-        if (key == place_key_str) or (user == user_or_place):
-            removed_user = user
-            continue
-
-        new_waitlist[str(idx)] = user
-        idx += 1
-
-    return new_waitlist, removed_user
+def user_has_any_availability(user_id: str, availability: dict) -> bool:
+    for queue in availability.values():
+        if user_id in queue.values():
+            return True
+    return False

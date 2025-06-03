@@ -18,21 +18,22 @@ def create_output(availability, grouped_times):
         current_end = datetime.fromisoformat(group[0][1])
 
         for start_time, end_time in group:
+            local_max_rsvps = 0   
             start_time = datetime.fromisoformat(start_time)
             end_time = datetime.fromisoformat(end_time)
 
             if start_time <= current_end + timedelta(hours=1):
                 current_end = max(current_end, end_time)
-                max_rsvps = max(max_rsvps, len(set(user for user in availability.get(start_time.isoformat(), []))))
+                max_rsvps = max(local_max_rsvps, len(set(user for user in availability.get(start_time.isoformat(), []))))
             else:
-                merged_time_range.append(f"`{current_start.strftime('%I%p').lower()} -> {current_end.strftime('%I%p').lower()}`")
+                merged_time_range.append(f"\n        --`{current_start.strftime('%I%p').lower()} -> {current_end.strftime('%I%p').lower()}` (RSVPs: {local_max_rsvps})")
                 current_start = start_time
                 current_end = end_time
 
-        merged_time_range.append(f"`{current_start.strftime('%I%p').lower()} -> {current_end.strftime('%I%p').lower()}`")
-        time_range = " & ".join(merged_time_range)
+        merged_time_range.append(f"\n        --`{current_start.strftime('%I%p').lower()} -> {current_end.strftime('%I%p').lower()}` (RSVPs: {max_rsvps})")
+        time_range = "".join(merged_time_range)
         date_str = current_start.strftime("%A, %m/%d/%y")
-        output.append(f"{date_str} {time_range} (RSVPs: {max_rsvps})")
+        output.append(f"{date_str} {time_range}")
 
     return output
 
