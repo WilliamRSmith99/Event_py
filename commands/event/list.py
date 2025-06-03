@@ -7,46 +7,50 @@ from commands.event import register, responses, manage
 import discord
 
 # --- Event Rendering ---
-def create_output(availability, grouped_times):
+def group_consecutive_hours(local_availability: list) -> list:
+    """
+    Accepts list of (date_string, [(local_dt, utc_str, rsvps_dict), ...])
+    Groups by date, merges consecutive slots, and finds max RSVPs per range.
+    """
     output = []
-    
-    for date, group in grouped_times.items():
-        group = sorted(group, key=lambda x: datetime.fromisoformat(x[0]))
-        merged_time_range = []
-        max_rsvps = 0
-        current_start = datetime.fromisoformat(group[0][0])
-        current_end = datetime.fromisoformat(group[0][1])
 
-        for start_time, end_time in group:
-            local_max_rsvps = 0   
-            start_time = datetime.fromisoformat(start_time)
-            end_time = datetime.fromisoformat(end_time)
+    for date_str, slots in local_availability:
+        if not slots:
+            continue
 
-            if start_time <= current_end + timedelta(hours=1):
-                current_end = max(current_end, end_time)
-                max_rsvps = max(local_max_rsvps, len(set(user for user in availability.get(start_time.isoformat(), []))))
+        # Sort slots by local datetime
+        slots.sort(key=lambda x: x[0])
+
+        merged_ranges = []
+        current_start = slots[0][0]
+        current_end = current_start + timedelta(hours=1)
+        max_rsvps = len(slots[0][2])  # Initial RSVP count
+
+        for i in range(1, len(slots)):
+            local_dt, _, rsvps = slots[i]
+            slot_end = local_dt + timedelta(hours=1)
+            rsvp_count = len(rsvps)
+
+            if local_dt <= current_end + timedelta(minutes=5):  # still mergeable
+                current_end = max(current_end, slot_end)
+                max_rsvps = max(max_rsvps, rsvp_count)
             else:
-                merged_time_range.append(f"\n        --`{current_start.strftime('%I%p').lower()} -> {current_end.strftime('%I%p').lower()}` (RSVPs: {local_max_rsvps})")
-                current_start = start_time
-                current_end = end_time
+                # close current merged range
+                merged_ranges.append(
+                    f"\n        --`{current_start.strftime('%I%p').lower()} -> {current_end.strftime('%I%p').lower()}` (RSVPs: {max_rsvps})"
+                )
+                current_start = local_dt
+                current_end = slot_end
+                max_rsvps = rsvp_count
 
-        merged_time_range.append(f"\n        --`{current_start.strftime('%I%p').lower()} -> {current_end.strftime('%I%p').lower()}` (RSVPs: {max_rsvps})")
-        time_range = "".join(merged_time_range)
-        date_str = current_start.strftime("%A, %m/%d/%y")
-        output.append(f"{date_str} {time_range}")
+        # Final range
+        merged_ranges.append(
+            f"\n        --`{current_start.strftime('%I%p').lower()} -> {current_end.strftime('%I%p').lower()}` (RSVPs: {max_rsvps})"
+        )
+
+        output.append(f"{date_str} {''.join(merged_ranges)}")
 
     return output
-
-
-def group_consecutive_hours(availability):
-    times = sorted(availability.keys())
-    grouped_times = defaultdict(list)
-
-    for time in times:
-        date_key = time.split("T")[0]  
-        grouped_times[date_key].append((time, time)) 
-    
-    return create_output(availability, grouped_times)
 
 async def format_single_event(interaction, event, is_edit=False, inherit_view=None):
     user_tz = user_state.get_user_timezone(interaction.user.id)
@@ -60,8 +64,8 @@ async def format_single_event(interaction, event, is_edit=False, inherit_view=No
         )
         view.message = msg
         return
-
-    proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours(event.availability))
+    local_availability = utils.from_utc_to_local(event.availability, user_tz)
+    proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours(local_availability))
     body = (
         f"📅 **Event:** `{event.event_name}`\n"
         f"🙋 **Organizer:** <@{event.organizer}>\n"
@@ -72,13 +76,13 @@ async def format_single_event(interaction, event, is_edit=False, inherit_view=No
     if inherit_view:
         view = inherit_view
     else:
-        view = EventView(event, is_selected=(str(interaction.user.id) in event.rsvp))
+        view = EventView(event, user_tz, is_selected=(str(interaction.user.id) in event.rsvp))
 
     if event.confirmed_date and event.confirmed_date != "TBD":
         view.add_item(NotificationButton(event))
 
     if await auth.authenticate(interaction.user, event.organizer):
-        view.add_item(ManageEventButton(event))
+        view.add_item(ManageEventButton(event, user_tz))
 
     if is_edit:
         msg = await interaction.response.edit_message(content=body, view=view)
@@ -121,20 +125,17 @@ class RegisterButton(Button):
         await register.schedule_command(interaction, self.event_name)
 
 class InfoButton(Button):
-    def __init__(self, event):
+    def __init__(self, event, user_tz):
         self.event = event
+        self.user_tz = user_tz
         self.event_name = event.event_name
         super().__init__(label="Info", style=discord.ButtonStyle.secondary, custom_id=f"info:{self.event_name}")
 
     async def callback(self, interaction: discord.Interaction):
-        event = events.get_event(interaction.guild.id, self.event_name)
-        if not event:
-            await interaction.response.send_message("⚠️ Event data missing.", ephemeral=True)
-            return
-
-        view = responses.OverlapSummaryView(event, show_back_button=True)
+        local_availability = utils.from_utc_to_local( self.event.availability, self.user_tz)
+        view = responses.OverlapSummaryView(self.event, local_availability, self.user_tz, show_back_button=True)
         msg = await interaction.response.edit_message(
-            content=f"📊 Top availability slots for **{event.event_name}**",
+            content=f"📊 Top availability slots for **{self.event.event_name}**",
             view=view
         )
         view.message = msg  # Optional if you want expiry cleanup on info view
@@ -148,8 +149,9 @@ class NotificationButton(Button):
         await interaction.response.send_message("📅 Notifications for the event are set!", ephemeral=True)
 
 class ManageEventButton(Button):
-    def __init__(self, event):
+    def __init__(self, event, user_tz):
         self.event = event
+        self.user_tz = user_tz
         self.event_name = event.event_name
         super().__init__(label="Manage Event", style=discord.ButtonStyle.danger, custom_id=f"manage_event:{self.event_name}")
 
@@ -158,7 +160,7 @@ class ManageEventButton(Button):
             await interaction.response.send_message("❌ You don’t have permission to manage this event.", ephemeral=True)
             return
 
-        view = ManageEventView(self.event, interaction.guild.id, interaction.user)
+        view = ManageEventView(self.event, self.user_tz, interaction.guild.id, interaction.user)
         await interaction.response.edit_message(
             view=view
         )
@@ -167,15 +169,16 @@ class ManageEventButton(Button):
 # --- View Definitions ---
 
 class EventView(utils.ExpiringView):
-    def __init__(self, event, is_selected=False):
+    def __init__(self, event, user_tz, is_selected=False):
         super().__init__(timeout=180)
         self.add_item(RegisterButton(event, is_selected))
-        self.add_item(InfoButton(event))
+        self.add_item(InfoButton(event, user_tz))
 
 class ManageEventView(utils.ExpiringView):
-    def __init__(self, event, guild_id: int, user):
+    def __init__(self, event, user_tz,guild_id: int, user):
         super().__init__(timeout=180)
         self.event = event
+        self.user_tz = user_tz
         self.event_details = event  # Added to fix missing field in delete
         self.guild_id = guild_id
         self.user = user
@@ -187,13 +190,13 @@ class ManageEventView(utils.ExpiringView):
             return
 
         is_selected = str(interaction.user.id) in self.event.rsvp
-        view = EventView(self.event, is_selected=is_selected)
+        view = EventView(self.event, self.user_tz, is_selected=is_selected)
 
         if self.event.confirmed_date and self.event.confirmed_date != "TBD":
             view.add_item(NotificationButton(self.event))
 
         if await auth.authenticate(self.user, self.event.organizer):
-            view.add_item(ManageEventButton(self.event))
+            view.add_item(ManageEventButton(self.event, self.user_tz))
 
         await interaction.response.edit_message(view=view)
         view.message = interaction.message
