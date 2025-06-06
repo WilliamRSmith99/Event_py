@@ -1,6 +1,5 @@
 import discord, uuid
-from datetime import datetime, timedelta
-from core import user_state, utils, events
+from core import utils, events, userdata
 from datetime import datetime, timedelta
 from commands.user import timezone
 def GenerateProposedDates(target: str = None):
@@ -111,7 +110,7 @@ class SubmitTimeButton(discord.ui.Button):
             )
             return
 
-        user_tz = user_state.get_user_timezone(interaction.user.id)
+        user_tz = userdata.get_user_timezone(interaction.user.id)
         if not user_tz:
             await utils.safe_send(
                 interaction,

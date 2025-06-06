@@ -5,7 +5,7 @@ import os
 from commands.configs import settings
 from commands.event import manage, register, responses, create, list
 from commands.user import timezone
-from core import auth, user_state, utils, events
+from core import auth, utils, events, userdata
 
 # Initialize intents and client
 intents = discord.Intents.default()
@@ -18,6 +18,7 @@ tree = discord.app_commands.CommandTree(client)
 
 # Define the specific guild for commands
 guild = discord.Object(id=1133941192187457576)
+
 
 # ============================================================
 #                        EVENT COMMANDS
@@ -88,7 +89,7 @@ async def configure_bot(interaction: discord.Interaction):
 @tree.command(name="timezone", description="Set and view your current timezone", guild=guild)
 async def viewtimezone(interaction: discord.Interaction):
     """Command to set or view user's current timezone."""
-    region = user_state.get_user_timezone(interaction.user.id)
+    region = userdata.get_user_timezone(interaction.user.id)
 
     async def handle_yes(inter: discord.Interaction):
         await utils.safe_send(

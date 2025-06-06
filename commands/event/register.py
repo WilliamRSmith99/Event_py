@@ -1,7 +1,6 @@
-import discord, pytz
-from collections import defaultdict
+import discord
 from commands.user import timezone
-from core import utils, user_state, events
+from core import utils, events, userdata
 from discord.ui import Button, View
 from discord import ButtonStyle
 
@@ -20,7 +19,7 @@ async def schedule_command(interaction: discord.Interaction, event_name: str):
         await utils.safe_send(interaction, f"📅 No time slots have been proposed for **{event.event_name}** yet.")
         return
 
-    user_tz_str = user_state.get_user_timezone(interaction.user.id)
+    user_tz_str = userdata.get_user_timezone(interaction.user.id)
     if not user_tz_str:
         await utils.safe_send(
             interaction,

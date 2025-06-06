@@ -1,14 +1,13 @@
 import discord
 from discord.ui import Button, View
-from collections import defaultdict
 from commands.user import timezone
-from core import utils, user_state
+from core import utils, userdata
 
 MAX_DATES_PER_PAGE = 4
 MAX_TIME_BUTTONS_PER_ROW = 4
 
 async def build_overlap_summary(interaction: discord.Interaction, event_name: str, guild_id: str):
-    user_tz_str = user_state.get_user_timezone(interaction.user.id)
+    user_tz_str = userdata.get_user_timezone(interaction.user.id)
     if not user_tz_str:
         await utils.safe_send(
             interaction,

@@ -1,5 +1,5 @@
 import discord
-from core import storage, user_state
+from core import storage,userdata
 
 timeZoneReference = storage.read_json("timezone_data.json")
 class TimezoneDropdown(discord.ui.Select):
@@ -21,7 +21,7 @@ class TimezoneDropdown(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction):
         """Callback for handling timezone selection or reset."""
         selected = self.values[0]
-        user_state.set_user_timezone(interaction.user.id, selected)
+        userdata.set_user_timezone(interaction.user.id, selected)
         response_message = f"✅ Timezone set to `{selected}`"
         
         # Respond according to whether it's a reset or select operation

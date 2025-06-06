@@ -1,8 +1,7 @@
 from discord.ui import Button
-from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import timedelta
 from commands.user import timezone
-from core import auth, events, user_state,utils
+from core import auth, events, utils, userdata
 from commands.event import register, responses, manage
 import discord
 
@@ -53,7 +52,7 @@ def group_consecutive_hours(local_availability: list) -> list:
     return output
 
 async def format_single_event(interaction, event, is_edit=False, inherit_view=None):
-    user_tz = user_state.get_user_timezone(interaction.user.id)
+    user_tz = userdata.get_user_timezone(interaction.user.id)
     if not user_tz:
         view = timezone.RegionSelectView(interaction.user.id)
         msg = await utils.safe_respond(
