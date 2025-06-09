@@ -6,7 +6,7 @@ from commands.event import register, responses, manage
 import discord
 
 # --- Event Rendering ---
-def group_consecutive_hours(local_availability: list) -> list:
+def group_consecutive_hours_local(local_availability: list) -> list:
     """
     Accepts list of (date_string, [(local_dt, utc_str, rsvps_dict), ...])
     Groups by date, merges consecutive slots, and finds max RSVPs per range.
@@ -64,7 +64,7 @@ async def format_single_event(interaction, event, is_edit=False, inherit_view=No
         view.message = msg
         return
     local_availability = utils.from_utc_to_local(event.availability, user_tz)
-    proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours(local_availability))
+    proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_local(local_availability))
     body = (
         f"📅 **Event:** `{event.event_name}`\n"
         f"🙋 **Organizer:** <@{event.organizer}>\n"

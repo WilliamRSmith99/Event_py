@@ -12,7 +12,7 @@ class ServerConfigState:
     admin_roles: List[int] = field(default_factory=list)
     event_organizer_roles: List[int] = field(default_factory=list)
     event_attendee_roles: List[int] = field(default_factory=list)
-    bulletin_channel: List[int] = field(default_factory=list)
+    bulletin_channel: str = ""
 
     # Toggleable section settings
     roles_and_permissions_settings_enabled: bool = True

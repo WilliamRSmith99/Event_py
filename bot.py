@@ -5,7 +5,7 @@ import os
 from commands.configs import settings
 from commands.event import manage, register, responses, create, list
 from commands.user import timezone
-from core import auth, utils, events, userdata
+from core import auth, utils, events, userdata, bulletins
 
 # Initialize intents and client
 intents = discord.Intents.default()
@@ -135,6 +135,10 @@ async def on_ready():
     print(f'Logged in as {client.user}')
     await tree.sync(guild=guild)
     print("Slash commands synced.")
-
+    all_bulletins = bulletins.load_event_bulletins()
+    # for guild, msgs in all_bulletins.items():
+    #     for msg_id, state in msgs.items():
+    #         view = CounterView(count=state["count"], is_ephemeral=False)
+    #         client.add_view(view)
 # Run the bot
 client.run(os.getenv('DISCORD_TOKEN'))
