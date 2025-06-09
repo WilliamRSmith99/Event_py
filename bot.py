@@ -135,10 +135,6 @@ async def on_ready():
     print(f'Logged in as {client.user}')
     await tree.sync(guild=guild)
     print("Slash commands synced.")
-    all_bulletins = bulletins.load_event_bulletins()
-    # for guild, msgs in all_bulletins.items():
-    #     for msg_id, state in msgs.items():
-    #         view = CounterView(count=state["count"], is_ephemeral=False)
-    #         client.add_view(view)
+    await bulletins.restore_bulletin_views(client)
 # Run the bot
 client.run(os.getenv('DISCORD_TOKEN'))

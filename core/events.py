@@ -1,7 +1,7 @@
-from typing import Dict, Optional, Union, Any
 from core.storage import read_json, write_json_atomic
 from dataclasses import dataclass, field
 from typing import Set, Dict, Any, Optional, Union, Tuple
+import uuid
 
 # ========== Event State Model ==========
 
@@ -13,18 +13,22 @@ class EventState:
     organizer: str
     organizer_cname: str
     confirmed_date: str
+    event_id: Optional[str] = f"{uuid.uuid4()}"
     bulletin_channel_id: Optional[int] = None
     bulletin_message_id: Optional[int] = None
     bulletin_thread_id: Optional[int] = None
-    rsvp: Set[str] = field(default_factory=set)
-    slots: Set[str] = field(default_factory=set)
+    rsvp: list[str] = field(default_factory=list)
+    slots: list[str] = field(default_factory=list)
     availability: Dict[str, Dict[str, str]] = field(default_factory=dict)
-    waitlist: Dict[str, Dict[str, str]] = field(default_factory=dict)  
+    waitlist: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    availability_to_message_map: Dict[str, Dict[str, Union[int, str]]] = field(default_factory=dict)
+    # Format: { utc_iso: { "thread_id": int, "message_id": int, "embed_index": int, "field_name": str } }
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "guild_id": self.guild_id,
             "event_name": self.event_name,
+            "event_id": self.event_id,
             "max_attendees": self.max_attendees,
             "organizer": self.organizer,
             "organizer_cname": self.organizer_cname,
@@ -32,9 +36,11 @@ class EventState:
             "bulletin_channel_id": self.bulletin_channel_id,
             "bulletin_message_id": self.bulletin_message_id,
             "bulletin_thread_id": self.bulletin_thread_id,
-            "rsvp": list(self.rsvp),
-            "slots": list(self.slots),
-            "availability": {iso: {spot: user for spot, user in spots.items()} for iso, spots in self.availability.items()},
+            "rsvp": self.rsvp,
+            "slots": self.slots,
+            "availability": self.availability,
+            "waitlist": self.waitlist,
+            "availability_to_message_map": self.availability_to_message_map
         }
 
     @staticmethod
@@ -42,6 +48,7 @@ class EventState:
         return EventState(
             guild_id=data["guild_id"],
             event_name=data["event_name"],
+            event_id=data["event_id"],
             max_attendees=data["max_attendees"],
             organizer=data["organizer"],
             organizer_cname=data["organizer_cname"],
@@ -49,11 +56,12 @@ class EventState:
             bulletin_channel_id=data.get("bulletin_channel_id"),
             bulletin_message_id=data.get("bulletin_message_id"),
             bulletin_thread_id=data.get("bulletin_thread_id"),
-            rsvp=set(data.get("rsvp", [])),
-            slots=set(data.get("slots", [])),
-            availability={iso: {spot: user for spot, user in spots.items()} for iso, spots in data.get("availability", {}).items()},
+            rsvp=data.get("rsvp", []),
+            slots=data.get("slots", []),
+            availability=data.get("availability", {}),
+            waitlist=data.get("waitlist", {}),
+            availability_to_message_map=data.get("availability_to_message_map", {})
         )
-
 
 DATA_FILE_NAME = "events.json"
 
@@ -84,15 +92,16 @@ def save_events(data: Dict[str, Dict[str, Dict[str, EventState]]]) -> None:
         }
         for gid, gdata in data.items()
     }
-
     write_json_atomic(DATA_FILE_NAME, to_save)
 
 # ========== CRUD ==========
 
 def get_event(guild_id: int, event_name: str) -> Optional[EventState]:
+    events_list = load_events()
     return events_list.get(str(guild_id), {}).get("events", {}).get(event_name)
 
 def get_events(guild_id: int, name: Optional[str] = None) -> Dict[str, EventState]:
+    events_list = load_events()
     guild_id_str = str(guild_id)
     raw_events = events_list.get(guild_id_str, {}).get("events", {})
     events = {
