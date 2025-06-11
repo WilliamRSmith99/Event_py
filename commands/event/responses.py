@@ -16,7 +16,7 @@ async def build_overlap_summary(interaction: discord.Interaction, event_name: st
         )
         return
 
-    event_matches = event.get_events(guild_id, event_name)
+    event_matches = event.get_events_by_name(guild_id, event_name)
     if len(event_matches) == 0:
         return None, "❌ Event not found."
     elif len(event_matches) == 1:

@@ -29,7 +29,7 @@ def GenerateProposedDates(target: str = None):
 
 class DateButton(discord.ui.Button):
     def __init__(self, label, event_data, parent_view, style=discord.ButtonStyle.secondary):
-        super().__init__(label=label, style=style, custom_id=str(uuid.uuid4()))
+        super().__init__(label=label, style=style)
         self.slot_label = label
         self.event_data = event_data
         self.parent_view = parent_view
@@ -232,7 +232,8 @@ class NewEventModal(discord.ui.Modal, title="Create a new event"):
         event_data = events.EventState(
             guild_id=str(interaction.guild_id),
             event_name=self.event_name_input.value,
-            max_attendees=self.max_attendees_input.value,
+            event_id=str(uuid.uuid4()),
+            max_attendees=self.max_attendees_input.value,       
             organizer=interaction.user.id,
             organizer_cname=interaction.user.name,
             confirmed_date="TBD",

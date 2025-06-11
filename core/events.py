@@ -1,7 +1,6 @@
 from core.storage import read_json, write_json_atomic
 from dataclasses import dataclass, field
 from typing import Set, Dict, Any, Optional, Union, Tuple
-import uuid
 
 # ========== Event State Model ==========
 
@@ -13,7 +12,7 @@ class EventState:
     organizer: str
     organizer_cname: str
     confirmed_date: str
-    event_id: Optional[str] = f"{uuid.uuid4()}"
+    event_id: str
     bulletin_channel_id: Optional[int] = None
     bulletin_message_id: Optional[int] = None
     bulletin_thread_id: Optional[int] = None
@@ -22,7 +21,6 @@ class EventState:
     availability: Dict[str, Dict[str, str]] = field(default_factory=dict)
     waitlist: Dict[str, Dict[str, str]] = field(default_factory=dict)
     availability_to_message_map: Dict[str, Dict[str, Union[int, str]]] = field(default_factory=dict)
-    # Format: { utc_iso: { "thread_id": int, "message_id": int, "embed_index": int, "field_name": str } }
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -96,36 +94,30 @@ def save_events(data: Dict[str, Dict[str, Dict[str, EventState]]]) -> None:
 
 # ========== CRUD ==========
 
-def get_event(guild_id: int, event_name: str) -> Optional[EventState]:
-    events_list = load_events()
-    return events_list.get(str(guild_id), {}).get("events", {}).get(event_name)
+def get_event_by_id(guild_id: int, event_id: str) -> Optional[EventState]:
+    return events_list.get(str(guild_id), {}).get("events", {}).get(event_id)
 
-def get_events(guild_id: int, name: Optional[str] = None) -> Dict[str, EventState]:
-    events_list = load_events()
+def get_events_by_name(guild_id: int, name: Optional[str] = None) -> Dict[str, EventState]:
     guild_id_str = str(guild_id)
     raw_events = events_list.get(guild_id_str, {}).get("events", {})
     events = {
-        name: event if isinstance(event, EventState) else EventState.from_dict(event)
-        for name, event in raw_events.items()
+        event.event_id: event if isinstance(event, EventState) else EventState.from_dict(event)
+        for event in raw_events.values()
     }
 
     if not name:
         return events
 
     name_lower = name.lower()
-    for event_name in events:
-        if event_name.lower() == name_lower:
-            return {event_name: events[event_name]}
-
     return {
-        event_name: event
-        for event_name, event in events.items()
-        if name_lower in event_name.lower() or event_name.lower().startswith(name_lower)
+        event_id: event
+        for event_id, event in events.items()
+        if name_lower in event.event_name.lower()
     }
 
 def modify_event(event_state: Union[EventState, dict]) -> None:
     guild_id = str(event_state.guild_id if isinstance(event_state, EventState) else event_state.get("guild_id"))
-    event_name = event_state.event_name if isinstance(event_state, EventState) else event_state.get("event_name")
+    event_id = event_state.event_id if isinstance(event_state, EventState) else event_state.get("event_id")
 
     if guild_id not in events_list:
         events_list[guild_id] = {"events": {}}
@@ -133,12 +125,12 @@ def modify_event(event_state: Union[EventState, dict]) -> None:
     if isinstance(event_state, dict):
         event_state = EventState.from_dict(event_state)
 
-    events_list[guild_id]["events"][event_name] = event_state
+    events_list[guild_id]["events"][event_id] = event_state
     save_events(events_list)
 
-def delete_event(guild_id: str, event_name: str) -> bool:
+def delete_event(guild_id: str, event_id: str) -> bool:
     try:
-        del events_list[str(guild_id)]["events"][event_name]
+        del events_list[str(guild_id)]["events"][event_id]
         save_events(events_list)
         return True
     except KeyError as e:

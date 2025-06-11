@@ -8,7 +8,7 @@ MAX_TIME_BUTTONS = 20
 
 async def schedule_command(interaction: discord.Interaction, event_name: str, eph_resp: bool = False):
     guild_id = interaction.guild_id
-    matches = events.get_events(guild_id, event_name)
+    matches = events.get_events_by_name(guild_id, event_name)
 
     if not matches or len(matches) != 1:
         await interaction.response.send_message("❌ Event not found.", ephemeral=True)
@@ -196,26 +196,12 @@ class SubmitAllButton(Button):
             if not view.event.bulletin_message_id or not event_msg_directory.get(f"{view.event.bulletin_message_id}",False):
                 return await interaction.response.send_message("Failed to locate bulletin message.", ephemeral=True)
             event_data = view.event
-            event_bulletin_msg = event_msg_directory[f"{event_data.bulletin_message_id}"]
-            thread = interaction.client.get_channel(int(event_bulletin_msg.thread_id))
-            for msg, slots in event_bulletin_msg.thread_messages.items():
-                message = await thread.fetch_message(int(msg))
+            ###### THREADS GO HERE ######
+            # Update main bulletin head message
+            await bulletins.update_bulletin_header(interaction.client, event_data)
 
-                new_embed = bulletins.generate_single_embed_for_message(event_data, str(message.id))
-                if new_embed:
-                    # Rebuild the view (button rows) for this embed
-                    view = bulletins.ThreadView(event_data.event_name, [
-                        (info["embed_index"], slot)
-                        for slot, info in event_data.availability_to_message_map.items()
-                        if info["message_id"] == str(message.id)
-                    ])
-                    await message.edit(embed=new_embed, view=view)
-
-                # Update main bulletin head message
-                await bulletins.update_bulletin_header(interaction.client, event_data)
-
-                # Save updated events
-                events.modify_event(event_data)
+            # Save updated events
+            events.modify_event(event_data)
 
         await interaction.response.edit_message(
             content=f"✅ Availability updated for **{event_data.event_name}**.",
@@ -247,3 +233,21 @@ class NavButton(Button):
 
         view.render_buttons()
         await interaction.response.edit_message(view=view, content=view.render_date_label())
+
+
+
+## Temp removed thread logic
+            # event_bulletin_msg = event_msg_directory[f"{event_data.bulletin_message_id}"]
+            # thread = interaction.client.get_channel(int(event_bulletin_msg.thread_id))
+            # for msg, slots in event_bulletin_msg.thread_messages.items():
+            #     message = await thread.fetch_message(int(msg))
+
+            #     new_embed = bulletins.generate_single_embed_for_message(event_data, str(message.id))
+            #     if new_embed:
+            #         # Rebuild the view (button rows) for this embed
+            #         view = bulletins.ThreadView(event_data.event_name, [
+            #             (info["embed_index"], slot)
+            #             for slot, info in event_data.availability_to_message_map.items()
+            #             if info["message_id"] == str(message.id)
+            #         ])
+            #         await message.edit(embed=new_embed, view=view)

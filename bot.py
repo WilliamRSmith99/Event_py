@@ -38,7 +38,7 @@ async def event(interaction: discord.Interaction, filter: Optional[str] = None):
 @tree.command(name="manage_event", description="Organizer and Admin ONLY: Manage an upcoming event", guild=guild)
 @app_commands.describe(action='one of "edit", "confirm", "delete"', event_name="The event name you want to manage.")
 async def manage_event(interaction: discord.Interaction, event_name: str, action: Literal["edit", "confirm", "delete"]):
-    events_match = events.get_events(interaction.guild.id, event_name )
+    events_match = events.get_events_by_name(interaction.guild.id, event_name )
     if len(events_match) == 0:
         await interaction.response.send_message("❌ Oh no! no events could be matched for `{event_name}`.\nPlease try again.", ephemeral=True)
         return False
@@ -63,7 +63,7 @@ async def manage_event(interaction: discord.Interaction, event_name: str, action
         case "confirm":
             await interaction.response.send_message("Action confirmed!")
         case "delete":
-            await list._prompt_event_deletion(interaction, interaction.guild.id, event_name_exact, event_details)
+            await manage._prompt_event_deletion(interaction, interaction.guild.id, event_details)
             return True
     
 

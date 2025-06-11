@@ -20,36 +20,41 @@ class DeleteEventConfirmView(discord.ui.View):
         await _prompt_event_deletion(
             interaction,
             self.guild_id,
-            self.event_name,
             self.event_details
         )
 
-async def delete_event(interaction: discord.Interaction, guild_id: int, event_name: str) -> bool:
-    events_found = event.get_events(guild_id, event_name)
+async def delete_event(interaction: discord.Interaction, guild_id: int, event_name: str = False, event_id: str = False) -> bool:
+    if not event_id:
+        events_found = events.get_events_by_name(guild_id, event_name)
 
-    if len(events_found) == 0:
-        await interaction.response.send_message("❌ Failure! Unable to locate event.", ephemeral=True)
-        return False
+        if len(events_found) == 0:
+            await interaction.response.send_message("❌ Failure! Unable to locate event.", ephemeral=True)
+            return False
 
-    elif len(events_found) > 1:
-        await interaction.response.send_message(
-            f"😬 Oh no! An exact match couldn't be located for `{event_name}`.\n"
-            "Did you mean one of these?",
-            ephemeral=True
-        )
+        elif len(events_found) > 1:
+            await interaction.response.send_message(
+                f"😬 Oh no! An exact match couldn't be located for `{event_name}`.\n"
+                "Did you mean one of these?",
+                ephemeral=True
+            )
 
-        for matched_name, event in events_found.items():
-            view = list.ManageEventView(event, interaction.guild.id, interaction.user)
-            await list.format_single_event(interaction, event, is_edit=False,inherit_view=view)
+            for matched_name, event in events_found.items():
+                view = list.ManageEventView(event, interaction.guild.id, interaction.user)
+                await list.format_single_event(interaction, event, is_edit=False,inherit_view=view)
 
-        return False
+            return False
 
+        else:
+                event_name_exact, event_details = list(events_found.items())[0]
+                await _prompt_event_deletion(interaction, guild_id, event_details)
+                return True
     else:
-            event_name_exact, event_details = list(events_found.items())[0]
-            await _prompt_event_deletion(interaction, guild_id, event_name_exact, event_details)
-            return True
+        event_details = events.get_event_by_id(guild_id=guild_id, event_id=event_id)
+        await _prompt_event_deletion(interaction, guild_id, event_details)
+        return True
 
-async def _prompt_event_deletion(interaction, guild_id, event_name, event_details, return_on_cancel=None):
+
+async def _prompt_event_deletion(interaction, guild_id, event_details, return_on_cancel=None):
     if not await auth.authenticate(interaction.user, event_details.organizer):
         await interaction.response.send_message("❌ You don’t have permission to delete this event.", ephemeral=True)
         return
@@ -62,7 +67,7 @@ async def _prompt_event_deletion(interaction, guild_id, event_name, event_detail
             await inter.response.send_message("❌ You don’t have permission to delete this event.", ephemeral=True)
             return
 
-        result = events.delete_event(guild_id, event_name)
+        result = events.delete_event(guild_id, event_details.event_id)
         message = (
             f"🪄 Poof! **{event_details.event_name}** successfully deleted"
             if result else

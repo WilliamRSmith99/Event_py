@@ -93,7 +93,7 @@ async def format_single_event(interaction, event, is_edit=False, inherit_view=No
 
 async def event_info(interaction: discord.Interaction, event_name: str = None):
     """Displays upcoming events or a message if no events are found."""
-    events_found = events.get_events(interaction.guild_id, event_name)
+    events_found = events.get_events_by_name(interaction.guild_id, event_name)
 
     if not events_found:
         message = (
@@ -217,7 +217,6 @@ class ManageEventView(utils.ExpiringView):
         await manage._prompt_event_deletion(
             interaction,
             self.guild_id,
-            self.event.event_name,
             self.event_details,
             return_on_cancel=format_single_event(interaction, self.event_details)
         )
