@@ -3,7 +3,7 @@ from typing import Dict, Any, Union
 from core.storage import read_json, write_json_atomic
 from core import events,utils,userdata,auth
 from datetime import datetime, timedelta
-from commands.event import register,responses, manage
+from commands.event import register,responses, manage, lists
 from commands.user import timezone
 import discord
 from discord.ui import Button, View
@@ -115,7 +115,8 @@ async def restore_bulletin_views(client: discord.Client):
     for guild_id, bulletin_map in all_bulletins.items():
         for head_msg_id, bulletin in bulletin_map.items():
             try:
-                view = BulletinView(bulletin.event)
+                event = events.get_event_by_id(guild_id,bulletin.event_id)
+                view = lists.EventView(event, "bulletin", False)
 
                 # Add view back to the client
                 client.add_view(view, message_id=int(head_msg_id))
@@ -126,93 +127,11 @@ async def restore_bulletin_views(client: discord.Client):
                 print(f"⚠️ Failed to restore view for bulletin '{bulletin.event}' in guild {guild_id}: {e}")
     print(f"Loaded {msg_count} bulletins from disk.")
 
-def format_discord_timestamp(iso_str: str) -> str:
-    """Return a Discord full timestamp (<t:...:f>) from UTC ISO string."""
-    dt = datetime.fromisoformat(iso_str)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=datetime.timezone.utc)
-    return f"<t:{int(dt.timestamp())}:f>"
-
-def group_consecutive_hours_timestamp(availability: dict) -> list[str]:
-    """
-    Groups adjacent 1-hour UTC slots from event_data.availability.
-    Returns strings showing full Discord timestamps with RSVP counts.
-    """
-    if not availability:
-        return []
-
-    # Sort by UTC datetime
-    sorted_slots = sorted(
-        [(datetime.fromisoformat(ts), ts, len(users)) for ts, users in availability.items()],
-        key=lambda x: x[0]
-    )
-
-    output = []
-    start_dt, start_ts, max_rsvp = sorted_slots[0]
-    end_dt = start_dt + timedelta(hours=1)
-    end_ts = start_ts
-
-    for i in range(1, len(sorted_slots)):
-        current_dt, current_ts, rsvp_count = sorted_slots[i]
-        next_end = current_dt + timedelta(hours=1)
-
-        if current_dt <= end_dt + timedelta(minutes=5):  # allow small overlap
-            end_dt = next_end
-            end_ts = current_ts
-            max_rsvp = max(max_rsvp, rsvp_count)
-        else:
-            output.append(
-                f"{format_discord_timestamp(start_ts)} -> {format_discord_timestamp(end_ts)} (RSVPs: {max_rsvp})"
-            )
-            start_dt, start_ts, max_rsvp = current_dt, current_ts, rsvp_count
-            end_dt = next_end
-            end_ts = current_ts
-
-    # Final range
-    output.append(
-        f"{format_discord_timestamp(start_ts)} -> {format_discord_timestamp(end_ts)} (RSVPs: {max_rsvp})"
-    )
-
-    return output
-
-async def generate_new_bulletin(interaction: discord.Interaction,event_data,server_config  ):
-    channel = interaction.guild.get_channel(int(server_config.bulletin_channel))
-    if not channel:
-        print("channel not found")
-        return  # Skip if channel is not found
-    event_data.bulletin_channel_id = str(server_config.bulletin_channel)
-    proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_timestamp(event_data.availability))
-
-    bulletin_body = (
-        f"📅 **Event:** `{event_data.event_name}`\n"
-        f"🙋 **Organizer:** <@{event_data.organizer}>\n"
-        f"✅ **Confirmed Date:** *{event_data.confirmed_date or 'TBD'}*\n"
-        f"🗓️ **Proposed Dates:**\n{proposed_dates or '*None yet*'}\n\n\n"
-    )
-    bulletin_view=BulletinView(event_data.event_id)
-    bulletin_msg =await channel.send(content=bulletin_body, view=bulletin_view)
-    event_data.bulletin_message_id = str(bulletin_msg.id)
-    bulletin = BulletinMessageEntry(
-        event=event_data.event_name,
-        event_id=event_data.event_id,
-        guild_id=event_data.guild_id,
-        channel_id=server_config.bulletin_channel,
-        msg_head_id=f"{bulletin_msg.id}" 
-    )   
-                ###### THREADING GOES HERE #####
-
-    events.modify_event(event_data)
-    modify_event_bulletin(guild_id=interaction.guild.id, entry=bulletin)
-    await interaction.response.edit_message(
-    content=f"✅ **Finished setting up available times for {event_data.event_name}!**\nPosted bulletin and created signup thread in <#{server_config.bulletin_channel}>.",
-    view=None
-    )
-
 async def update_bulletin_header(client: discord.Client, event_data: events.EventState):
     bulletin = client.get_channel(int(event_data.bulletin_channel_id))
     head_msg = await bulletin.fetch_message(int(event_data.bulletin_message_id))
 
-    proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_timestamp(event_data.availability))
+    proposed_dates = "\n".join(f"• {d}" for d in lists.group_consecutive_hours_timestamp(event_data.availability))
 
     bulletin_body = (
         f"📅 **Event:** `{event_data.event_name}`\n"
@@ -220,130 +139,10 @@ async def update_bulletin_header(client: discord.Client, event_data: events.Even
         f"✅ **Confirmed Date:** *{event_data.confirmed_date or 'TBD'}*\n"
         f"🗓️ **Proposed Dates:**\n{proposed_dates or '*None yet*'}\n\n\n"
     )
-    bulletin_view=BulletinView(event_data.event_id)
+    bulletin_view=lists.EventView(event_data, "bulletin", False)
 
     await head_msg.edit(content=bulletin_body,view=bulletin_view)
     
-# ========== Bulletin View ==========
-
-class RegisterButton(Button):
-    def __init__(self, event_id):
-        self.event_id = event_id
-        button_label = "🚀 Register"
-        button_style = discord.ButtonStyle.secondary
-        custom_id = f"register:{self.event_id}"
-        super().__init__(label=button_label, style=button_style, custom_id=custom_id)
-
-    async def callback(self, interaction: discord.Interaction):
-        await register.schedule_command(interaction, self.event_id, eph_resp=True)
-
-class NotifyMeButton(Button):
-    def __init__(self, event_id):
-        self.event_id = event_id
-        button_label = "🔔 Notify Me"
-        button_style = discord.ButtonStyle.secondary
-        custom_id = f"notify:{self.event_id}"
-        super().__init__(label=button_label, style=button_style, custom_id=custom_id)
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_message(
-        content=f"⚠️ **OOPS!**\nIt appears this feature is still under construction.",
-        view=None,
-        ephemeral=True
-        )
-class InfoButton(Button):
-    def __init__(self, event_id, user_tz):
-        self.user_tz = user_tz
-        self.event_id = event_id
-        super().__init__(label="💡 Info", style=discord.ButtonStyle.secondary, custom_id=f"info:{self.event_id}")
-
-    async def callback(self, interaction: discord.Interaction):
-        user_tz_str = userdata.get_user_timezone(interaction.user.id)
-        if not user_tz_str:
-            await utils.safe_send(
-                interaction,
-                "❌ Please set your timezone using `/settimezone` first!",
-                view=timezone.RegionSelectView(interaction.user.id)
-            )
-            return
-        event_data = events.get_event_by_id(guild_id=interaction.guild.id, event_id=self.event_id)
-        local_availability = utils.from_utc_to_local( event_data.availability, self.user_tz)
-        view = responses.OverlapSummaryView(event_data, local_availability, self.user_tz, show_back_button=False)
-        msg = await interaction.response.edit_message(
-            content=f"📊 Top availability slots for **{event_data.event_name}**",
-            view=view
-        )
-        view.message = msg  # Optional if you want expiry cleanup on info view
-
-class ManageEventButton(Button):
-    def __init__(self, event, user_tz):
-        self.event = event
-        self.user_tz = user_tz
-        self.event_id = event.event_id
-        super().__init__(label="🛠️ Manage Event", style=discord.ButtonStyle.danger, custom_id=f"manage_event:{self.event_id}")
-
-    async def callback(self, interaction: discord.Interaction):
-        if not await auth.authenticate(interaction.user, self.event.organizer):
-            await interaction.response.send_message("❌ You don’t have permission to manage this event.", ephemeral=True)
-            return
-
-        view = ManageEventView(self.event, self.user_tz, interaction.guild.id, interaction.user)
-        await interaction.response.edit_message(
-            view=view
-        )
-        view.message = interaction.message
-
-
-class BulletinView(View):
-    def __init__(self, event_id):
-        super().__init__(timeout=None) #custom_id=f"{event_id}:thread:{slots[0][1]}"
-        self.add_item(RegisterButton(event_id))
-        self.add_item(NotifyMeButton(event_id))
-
-
-class ManageEventView(utils.ExpiringView):
-    def __init__(self, event, user_tz,guild_id: int, user):
-        super().__init__(timeout=180)
-        self.event = event
-        self.user_tz = user_tz
-        self.event_details = event  # Added to fix missing field in delete
-        self.guild_id = guild_id
-        self.user = user
-
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
-    async def cancel_button(self, interaction: discord.Interaction, _):
-        if not await auth.authenticate(interaction.user, self.event.organizer):
-            await interaction.response.send_message("❌ You don’t have permission to view this event.", ephemeral=True)
-            return
-
-        is_selected = str(interaction.user.id) in self.event.rsvp
-        view = EventView(self.event, self.user_tz, is_selected=is_selected)
-
-        await interaction.response.edit_message(content=,view=view)
-        view.message = interaction.message
-
-    @discord.ui.button(label="Edit Event", style=discord.ButtonStyle.primary)
-    async def edit_button(self, interaction: discord.Interaction, _):
-        await interaction.response.send_message("🔧 Edit Event functionality coming soon! For now, you must remake events. Sorry...", ephemeral=True)
-
-    @discord.ui.button(label="Confirm Datetime", style=discord.ButtonStyle.success)
-    async def confirm_button(self, interaction: discord.Interaction, _):
-        await interaction.response.send_message("✅ Confirm Event Datetime functionality coming soon! \n\n for now, just use @everyone to announce your plans", ephemeral=True)
- 
-    @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger)
-    async def delete_button(self, interaction: discord.Interaction, _):
-        if not await auth.authenticate(interaction.user, self.event.organizer):
-            await interaction.response.send_message("❌ You don’t have permission to delete this event.", ephemeral=True)
-            return
-
-        await manage._prompt_event_deletion(
-            interaction,
-            self.guild_id,
-            self.event_details,
-            return_on_cancel=format_single_event(interaction, self.event_details)
-        )
-
-
 # ## Temporarily removed logic for threads
 #### Generate new bulletin()
 

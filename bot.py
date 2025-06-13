@@ -3,7 +3,7 @@ from discord import app_commands
 from typing import Optional, Literal
 import os
 from commands.configs import settings
-from commands.event import manage, register, responses, create, list
+from commands.event import manage, register, responses, create, lists
 from commands.user import timezone
 from core import auth, utils, events, userdata, bulletins
 
@@ -33,7 +33,7 @@ async def new_event(interaction: discord.Interaction):
 @app_commands.describe(filter="Filter by event name or partial")
 async def event(interaction: discord.Interaction, filter: Optional[str] = None):
     """Command to view events, optionally filter by event name."""
-    await list.event_info(interaction, filter)
+    await lists.event_info(interaction, filter)
     
 @tree.command(name="manage_event", description="Organizer and Admin ONLY: Manage an upcoming event", guild=guild)
 @app_commands.describe(action='one of "edit", "confirm", "delete"', event_name="The event name you want to manage.")
@@ -51,12 +51,12 @@ async def manage_event(interaction: discord.Interaction, event_name: str, action
         )
         await interaction.response.defer(ephemeral=True)
         for matched_name, event in events_match.items():
-            view = list.ManageEventView(event, interaction.guild.id, interaction.user)
-            await list.format_single_event(interaction, event, is_edit=False,inherit_view=view)
+            view = lists.ManageEventView(event, interaction.guild.id, interaction.user)
+            await lists.handle_event_message(interaction, event, "followup",inherit_view=view)
 
         return False
 
-    event_name_exact, event_details = list(events_match.items())[0]
+    event_name_exact, event_details = lists(events_match.items())[0]
     match action:
         case "edit":
             await interaction.response.send_message("Editing something...")

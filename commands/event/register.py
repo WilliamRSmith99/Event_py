@@ -6,60 +6,57 @@ from discord import ButtonStyle
 
 MAX_TIME_BUTTONS = 20
 
-async def schedule_command(interaction: discord.Interaction, event_name: str, eph_resp: bool = False):
+async def schedule_command(interaction: discord.Interaction, event_id: str, context: str = "edit"):
     guild_id = interaction.guild_id
-    matches = events.get_events_by_name(guild_id, event_name)
+    event_data = events.get_event_by_id(guild_id, event_id)
 
-    if not matches or len(matches) != 1:
+    if not event_data:
         await interaction.response.send_message("❌ Event not found.", ephemeral=True)
         return
 
-    event = list(matches.values())[0]
-    if not event or not event.availability:
-        if eph_resp:
-            await interaction.response.send_message(f"📅 No time slots have been proposed for **{event.event_name}** yet.", ephemeral=True)
+    if not event_data.availability:
+        if context == "bulletin":
+            await interaction.response.send_message(f"📅 No time slots have been proposed for **{event_data.event_name}** yet.", ephemeral=True)
             return
         else:
-            await utils.safe_send(interaction, f"📅 No time slots have been proposed for **{event.event_name}** yet.")
+            await utils.safe_send(interaction, f"📅 No time slots have been proposed for **{event_data.event_name}** yet.")
             return
 
     user_tz_str = userdata.get_user_timezone(interaction.user.id)
     if not user_tz_str:
-        if eph_resp:
+        if context == "bulletin":
             await interaction.response.send_message(
                 "❌ Please set your timezone using `/settimezone` first!",
                 view=timezone.RegionSelectView(interaction.user.id),
                 ephemeral=True
             )
-            return
         else:
             await utils.safe_send(
                 interaction,
                 "❌ Please set your timezone using `/settimezone` first!",
                 view=timezone.RegionSelectView(interaction.user.id)
             )
-            return
 
-    local_slots_by_date = utils.from_utc_to_local(event.availability, user_tz_str)
+    local_slots_by_date = utils.from_utc_to_local(event_data.availability, user_tz_str)
 
     if not local_slots_by_date:
-        if eph_resp:
+        if context == "bulletin":
             await interaction.response.send_message(
-                f"📅 No time slots available for **{event.event_name}**.",
+                f"📅 No time slots available for **{event_data.event_name}**.",
                 ephemeral=True
             )
             return
         else:
             await utils.safe_send(
                 interaction,
-                f"📅 No time slots available for **{event.event_name}**."
+                f"📅 No time slots available for **{event_data.event_name}**."
             )
             return
 
-    view = PaginatedHourSelectionView(event, local_slots_by_date, str(interaction.user.id))
+    view = PaginatedHourSelectionView(event_data, local_slots_by_date, str(interaction.user.id))
 
     try:
-        if interaction.type.name == "component" and not eph_resp:
+        if interaction.type.name == "component" and not context == "bulletin":
             await interaction.response.edit_message(content=view.render_date_label(), view=view)
         else:
             await interaction.response.send_message(content=view.render_date_label(), view=view, ephemeral=True)
@@ -167,41 +164,57 @@ class SubmitAllButton(Button):
     async def callback(self, interaction):
         view: PaginatedHourSelectionView = self.view
         changed = False
-
+        eid= view.event.event_id
+        event_data = events.get_event_by_id(interaction.guild.id,eid)
         selected = view.selected_utc_keys.copy()
+        if len(selected) == 0:
+            await interaction.response.edit_message(
+                content=f"✅ No Availability added for **{event_data.event_name}**.\n\n *Thanks for wasting electricity* 🫠",
+                view=None
+            )
+            return
         selected_utc_iso_strs = [iso_str for iso_str, _, _ in selected]
         for utc_iso_str in selected_utc_iso_strs:
-            user_list = view.event.availability.get(utc_iso_str, {})
+            user_list = event_data.availability.get(utc_iso_str, {})
             if view.user_id not in user_list.values():
                 next_position = str(len(user_list) + 1) 
-                view.event.availability[utc_iso_str][next_position] = view.user_id
+                event_data.availability[utc_iso_str][next_position] = view.user_id
                 changed = True
          
-        for utc_iso_str, user_dict in view.event.availability.items():
+        for utc_iso_str, user_dict in event_data.availability.items():
             if utc_iso_str not in selected_utc_iso_strs and view.user_id in user_list.values():
                 updated_queue = events.remove_user_from_queue(user_dict, view.user_id)
-                view.event.availability[utc_iso_str] = updated_queue
+                event_data.availability[utc_iso_str] = updated_queue
                 changed = True
 
-        if events.user_has_any_availability(view.user_id, view.event.availability):
-            view.event.rsvp.append(view.user_id)
+        if events.user_has_any_availability(view.user_id, event_data.availability):
+            event_data.rsvp.append(view.user_id)
         else:
-            view.event.rsvp.remove(view.user_id)
+            event_data.rsvp.remove(view.user_id)
 
         if changed:
             print("saving")
-            events.modify_event(view.event)
+            events.modify_event(event_data)
             # Get message info for this slot
-            event_msg_directory = bulletins.get_event_bulletin(guild_id=view.event.guild_id)
-            if not view.event.bulletin_message_id or not event_msg_directory.get(f"{view.event.bulletin_message_id}",False):
+            event_msg_directory = bulletins.get_event_bulletin(guild_id=event_data.guild_id)
+            if not event_data.bulletin_message_id:
+                await interaction.response.edit_message(
+                    content=f"✅ Availability updated for **{event_data.event_name}**.",
+                    view=None
+                )
+                return
+            elif not event_msg_directory.get(f"{event_data.bulletin_message_id}",False):
+                print(f"[Submit_Registration][{event_data.event_name}:{event_data.event_id}]ERROR: Bulletin id set, but unable to be located.")
+                await interaction.response.edit_message(
+                    content=f"✅ Availability updated for **{event_data.event_name}**.",
+                    view=None
+                )
                 return await interaction.response.send_message("Failed to locate bulletin message.", ephemeral=True)
-            event_data = view.event
+                
             ###### THREADS GO HERE ######
             # Update main bulletin head message
             await bulletins.update_bulletin_header(interaction.client, event_data)
 
-            # Save updated events
-            events.modify_event(event_data)
 
         await interaction.response.edit_message(
             content=f"✅ Availability updated for **{event_data.event_name}**.",

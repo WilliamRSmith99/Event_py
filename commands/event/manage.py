@@ -1,6 +1,6 @@
 import discord
 from core import auth, events
-from commands.event import list
+from commands.event import lists
 
 # ==========================
 #     Delete Event
@@ -39,13 +39,13 @@ async def delete_event(interaction: discord.Interaction, guild_id: int, event_na
             )
 
             for matched_name, event in events_found.items():
-                view = list.ManageEventView(event, interaction.guild.id, interaction.user)
-                await list.format_single_event(interaction, event, is_edit=False,inherit_view=view)
+                view = lists.ManageEventView(event, interaction.guild.id, interaction.user)
+                await lists.handle_event_message(interaction, event, context="followup",inherit_view=view)
 
             return False
 
         else:
-                event_name_exact, event_details = list(events_found.items())[0]
+                event_name_exact, event_details = lists(events_found.items())[0]
                 await _prompt_event_deletion(interaction, guild_id, event_details)
                 return True
     else:

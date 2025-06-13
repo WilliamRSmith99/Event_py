@@ -1,6 +1,7 @@
 import discord
 from discord.ui import Button, View
 from commands.user import timezone
+from commands.event import lists
 from core import utils, userdata
 
 MAX_DATES_PER_PAGE = 4
@@ -26,13 +27,12 @@ async def build_overlap_summary(interaction: discord.Interaction, event_name: st
         await interaction.response.send_message(
             f"📊 Top availability slots for **{event.event_name}**", view=view, ephemeral=True)
     else:
-        from commands.event.list import format_single_event
         await interaction.response.send_message(
             f"😬 Oh no! An exact match couldn't be located for `{event_name}`.\n"
             "Did you mean one of these?", ephemeral=True)
         await interaction.response.defer(ephemeral=True, thinking=True)
         for event in event_matches.values():
-            await format_single_event(interaction, event, is_edit=False)
+            await lists.handle_event_message(interaction, event, context="followup")
 
 class OverlapSummaryButton(Button):
     def __init__(self, label: str, utc_iso: str, row: int):
@@ -127,8 +127,7 @@ class BackToInfoButton(Button):
         self.event = event
 
     async def callback(self, interaction: discord.Interaction):
-        from commands.event.list import format_single_event
-        await format_single_event(interaction, self.event, is_edit=True)
+        await lists.handle_event_message(interaction, self.event, "edit")
 
 class OverlapSummaryView(View):
     def __init__(self, event, local_availability, user_timezone: str, date_page: int = 0, time_page: int = 0, show_back_button: bool = False):

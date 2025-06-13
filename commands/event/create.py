@@ -2,7 +2,7 @@ import discord, uuid
 from core import utils, events, userdata, conf, bulletins
 from datetime import datetime, timedelta
 from commands.user import timezone
-from commands.event import list as ls
+from commands.event import lists as ls
 
 
 def GenerateProposedDates(target: str = None):
@@ -146,7 +146,7 @@ class SubmitTimeButton(discord.ui.Button):
             ## Create Public event bulletin, if configured
             server_config = conf.get_config(self.event_data.guild_id)
             if getattr(server_config, "bulletin_settings_enabled", False) and getattr(server_config, "bulletin_channel", False):
-                await bulletins.generate_new_bulletin(interaction, event_data=self.event_data,server_config=server_config)
+                await ls.handle_event_message(interaction, self.event_data,server_config=server_config,context="bulletin")
             else:
                 await interaction.response.edit_message(
                 content=f"✅ **Finished setting up available times for {self.event_data.event_name}!**",
