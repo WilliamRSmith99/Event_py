@@ -18,11 +18,6 @@ def to_utc_isoformat(datetime_str: str, user_timezone: str) -> str:
         print(f"Error in to_utc_isoformat: {e}")
         return datetime_str  # Return the original string if an error occurs
 
-
-from collections import defaultdict
-from datetime import datetime
-import pytz
-
 def from_utc_to_local(availability, user_timezone: str) -> list:
     """
     Convert UTC time strings to user's local time, grouped and sorted by local date.

@@ -1,6 +1,6 @@
 import discord
 from commands.user import timezone
-from core import utils, events, userdata, bulletins
+from core import utils, events, userdata, bulletins, auth
 from discord.ui import Button, View
 from discord import ButtonStyle
 
@@ -64,10 +64,11 @@ async def schedule_command(interaction: discord.Interaction, event_id: str, cont
         await interaction.followup.send(f"❌ Failed to display schedule view: {str(e)}", ephemeral=True)    
 
 class PaginatedHourSelectionView(View):
-    def __init__(self, event, slots_data_by_date, user_id):
+    def __init__(self, event, slots_data_by_date, user_id, context="register"):
         super().__init__(timeout=900)
         self.event = event
         self.user_id = user_id
+        self.context = context
         self.page = 0
         self.current_date_index = 0
         self.selected_utc_keys = set()
@@ -110,27 +111,27 @@ class PaginatedHourSelectionView(View):
         # Navigation row
         self.add_item(NavButton("⬅️ Prev Date", "prev_date", disabled=self.current_date_index == 0))
         self.add_item(NavButton("⬅️ Earlier Times", "earlier", disabled=self.page == 0))
-        self.add_item(SubmitAllButton())
+        self.add_item(SubmitAllButton(context=self.context))
         self.add_item(NavButton("Later Times ➡️", "later", disabled=self.page >= total_pages))
         self.add_item(NavButton("Next Date ➡️", "next_date", disabled=self.current_date_index >= len(self.date_objs) - 1))
-        self.clear_items()
-        slots = self.slots_by_date[self.current_date_index]
-        start = self.page * MAX_TIME_BUTTONS
-        end = start + MAX_TIME_BUTTONS
+        # self.clear_items()
+        # slots = self.slots_by_date[self.current_date_index]
+        # start = self.page * MAX_TIME_BUTTONS
+        # end = start + MAX_TIME_BUTTONS
 
-        for utc_iso_str, local_dt, date_key, hour_key, users in slots[start:end]:
-            selected = (utc_iso_str, date_key, hour_key) in self.selected_utc_keys
-            count = len(users)
-            self.add_item(LocalizedHourToggleButton(utc_iso_str, local_dt, date_key, hour_key, selected, count))
+        # for utc_iso_str, local_dt, date_key, hour_key, users in slots[start:end]:
+        #     selected = (utc_iso_str, date_key, hour_key) in self.selected_utc_keys
+        #     count = len(users)
+        #     self.add_item(LocalizedHourToggleButton(utc_iso_str, local_dt, date_key, hour_key, selected, count))
 
-        total_pages = (len(slots) - 1) // MAX_TIME_BUTTONS
+        # total_pages = (len(slots) - 1) // MAX_TIME_BUTTONS
 
-        # Navigation row
-        self.add_item(NavButton("⬅️ Prev Date", "prev_date", disabled=self.current_date_index == 0))
-        self.add_item(NavButton("⬅️ Earlier Times", "earlier", disabled=self.page == 0))
-        self.add_item(SubmitAllButton())
-        self.add_item(NavButton("Later Times ➡️", "later", disabled=self.page >= total_pages))
-        self.add_item(NavButton("Next Date ➡️", "next_date", disabled=self.current_date_index >= len(self.date_objs) - 1))
+        # # Navigation row
+        # self.add_item(NavButton("⬅️ Prev Date", "prev_date", disabled=self.current_date_index == 0))
+        # self.add_item(NavButton("⬅️ Earlier Times", "earlier", disabled=self.page == 0))
+        # self.add_item(SubmitAllButton(context=self.context))
+        # self.add_item(NavButton("Later Times ➡️", "later", disabled=self.page >= total_pages))
+        # self.add_item(NavButton("Next Date ➡️", "next_date", disabled=self.current_date_index >= len(self.date_objs) - 1))
 
 
 class LocalizedHourToggleButton(Button):
@@ -158,8 +159,9 @@ class LocalizedHourToggleButton(Button):
 
 
 class SubmitAllButton(Button):
-    def __init__(self):
+    def __init__(self, context="register"):
         super().__init__(label="✅ Submit Times", style=ButtonStyle.primary, row=4)
+        self.context = context
 
     async def callback(self, interaction):
         view: PaginatedHourSelectionView = self.view
@@ -169,28 +171,47 @@ class SubmitAllButton(Button):
         selected = view.selected_utc_keys.copy()
         if len(selected) == 0:
             await interaction.response.edit_message(
-                content=f"✅ No Availability added for **{event_data.event_name}**.\n\n *Thanks for wasting electricity* 🫠",
+                content=f"✅ No timeslots selected for **{event_data.event_name}**.\n\n *Thanks for wasting electricity* 🫠",
                 view=None
             )
             return
         selected_utc_iso_strs = [iso_str for iso_str, _, _ in selected]
-        for utc_iso_str in selected_utc_iso_strs:
-            user_list = event_data.availability.get(utc_iso_str, {})
-            if view.user_id not in user_list.values():
-                next_position = str(len(user_list) + 1) 
-                event_data.availability[utc_iso_str][next_position] = view.user_id
-                changed = True
-         
-        for utc_iso_str, user_dict in event_data.availability.items():
-            if utc_iso_str not in selected_utc_iso_strs and view.user_id in user_list.values():
-                updated_queue = events.remove_user_from_queue(user_dict, view.user_id)
-                event_data.availability[utc_iso_str] = updated_queue
-                changed = True
+        if self.context == "global_availability":
+            if not await auth.authenticate(interaction.user, view.event.organizer):
+                await interaction.response.send_message("❌ You don’t have permission to edit this event.", ephemeral=True)
+                return
+            availability = {}
+            for utc_iso_str in selected_utc_iso_strs:
+                user_list = event_data.availability.get(utc_iso_str, {})
+                availability[utc_iso_str] = user_list
+            for user in event_data.rsvp:
+                if events.user_has_any_availability(view.user_id, event_data.availability):
+                    event_data.rsvp.append(view.user_id)
+                else:
+                    event_data.rsvp.remove(view.user_id)
+            event_data.availability = availability
+            events.modify_event(event_data)
+            changed = True
+            
+                
+        elif self.context == "register":
+            for utc_iso_str in selected_utc_iso_strs:
+                user_list = event_data.availability.get(utc_iso_str, {})
+                if view.user_id not in user_list.values():
+                    next_position = str(len(user_list) + 1) 
+                    event_data.availability[utc_iso_str][next_position] = view.user_id
+                    changed = True
+            
+            for utc_iso_str, user_dict in event_data.availability.items():
+                if utc_iso_str not in selected_utc_iso_strs and view.user_id in user_list.values():
+                    updated_queue = events.remove_user_from_queue(user_dict, view.user_id)
+                    event_data.availability[utc_iso_str] = updated_queue
+                    changed = True
 
-        if events.user_has_any_availability(view.user_id, event_data.availability):
-            event_data.rsvp.append(view.user_id)
-        else:
-            event_data.rsvp.remove(view.user_id)
+            if events.user_has_any_availability(view.user_id, event_data.availability):
+                event_data.rsvp.append(view.user_id)
+            else:
+                event_data.rsvp.remove(view.user_id)
 
         if changed:
             print("saving")

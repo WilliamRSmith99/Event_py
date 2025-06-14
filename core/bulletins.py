@@ -137,9 +137,10 @@ async def update_bulletin_header(client: discord.Client, event_data: events.Even
         f"📅 **Event:** `{event_data.event_name}`\n"
         f"🙋 **Organizer:** <@{event_data.organizer}>\n"
         f"✅ **Confirmed Date:** *{event_data.confirmed_date or 'TBD'}*\n"
-        f"🗓️ **Proposed Dates:**\n{proposed_dates or '*None yet*'}\n\n\n"
+        f"🗓️ **Proposed Dates (*Your local time*):**\n{proposed_dates or '*None yet*'}\n\n\n"
     )
     bulletin_view=lists.EventView(event_data, "bulletin", False)
+    bulletin_view.add_item(lists.ManageEventButton(event_data))
 
     await head_msg.edit(content=bulletin_body,view=bulletin_view)
     

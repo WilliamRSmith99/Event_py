@@ -66,13 +66,18 @@ async def handle_event_message(interaction, event, context="followup", inherit_v
         inherit_view (discord.ui.View): Optional inherited view to use for buttons.
         server_config (ServerConfig): Optional server config for bulletin channels.
     """
+    user_tz = userdata.get_user_timezone(interaction.user.id)
+    
+    if not user_tz or context == "bulletin":
+        user_tz = "*Your local time*"
+        
     # Format proposed dates based on the event's availability
     proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_timestamp(event.availability))
     body = (
         f"📅 **Event:** `{event.event_name}`\n"
         f"🙋 **Organizer:** <@{event.organizer}>\n"
         f"✅ **Confirmed Date:** *{event.confirmed_date or 'TBD'}*\n"
-        f"🗓️ **Proposed Dates:**\n{proposed_dates or '*None yet*'}\n"
+        f"🗓️ **Proposed Dates ({user_tz}):**\n{proposed_dates or '*None yet*'}\n"
     )
 
     # Determine the view for buttons

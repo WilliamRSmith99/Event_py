@@ -19,4 +19,4 @@ def set_user_timezone(user_id, timezone_str):
 
 # Get a user's timezone (or None if not set)
 def get_user_timezone(user_id):
-    return user_timezones.get(str(user_id), {}).get("timezone")
+    return user_timezones.get(str(user_id), {}).get("timezone", False)
