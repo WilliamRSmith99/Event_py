@@ -124,27 +124,34 @@ async def restore_bulletin_views(client: discord.Client):
     
             except Exception as e:
                 print(f"⚠️ Failed to restore view for bulletin '{bulletin.event}' in guild {guild_id}: {e}")
+                print("Removing from datastore...")
+                result = delete_event_bulletin(guild_id,head_msg_id)
+                print(f"delete {'successful' if result else 'failed'}")
     print(f"Loaded {msg_count} bulletins from disk.")
 
 async def update_bulletin_header(client: discord.Client, event_data: events.EventState):
-    bulletin = client.get_channel(int(event_data.bulletin_channel_id))
-    head_msg = await bulletin.fetch_message(int(event_data.bulletin_message_id))
-    event_data = events.get_event_by_id(event_data.guild_id, event_data.event_id)
-    confirmed_dates = None
-    if event_data.confirmed_dates:
-        confirmed_availability = { f"{iso_str}" : event_data.availability.get(f"{iso_str}", {}) for iso_str in event_data.confirmed_dates}    
-        confirmed_dates = "\n".join(f"• {d}" for d in lists.group_consecutive_hours_timestamp(confirmed_availability))
-    proposed_dates = "\n".join(f"• {d}" for d in lists.group_consecutive_hours_timestamp(event_data.availability))
-    bulletin_body = (
-        f"📅 **Event:** `{event_data.event_name}`\n"
-        f"🙋 **Organizer:** <@{event_data.organizer}>\n"
-        f"✅ **Confirmed Dates:** *{confirmed_dates or 'TBD'}*\n"
-        f"🗓️ **Proposed Dates (*Your local time*):**\n{proposed_dates or '*None yet*'}\n\n\n"
-    )
-    bulletin_view=lists.EventView(event_data, "bulletin", False)
-    bulletin_view.add_item(lists.ManageEventButton(event_data, "bulletin"))
+    try:
+        bulletin = client.get_channel(int(event_data.bulletin_channel_id))
+        head_msg = await bulletin.fetch_message(int(event_data.bulletin_message_id))
+        event_data = events.get_event_by_id(event_data.guild_id, event_data.event_id)
+        confirmed_dates = None
+        if event_data.confirmed_dates:
+            confirmed_availability = { f"{iso_str}" : event_data.availability.get(f"{iso_str}", {}) for iso_str in event_data.confirmed_dates}    
+            confirmed_dates = "\n".join(f"• {d}" for d in lists.group_consecutive_hours_timestamp(confirmed_availability))
+        proposed_dates = "\n".join(f"• {d}" for d in lists.group_consecutive_hours_timestamp(event_data.availability))
+        bulletin_body = (
+            f"📅 **Event:** `{event_data.event_name}`\n"
+            f"🙋 **Organizer:** <@{event_data.organizer}>\n"
+            f"✅ **Confirmed Dates:** *{confirmed_dates or 'TBD'}*\n"
+            f"🗓️ **Proposed Dates (*Your local time*):**\n{proposed_dates or '*None yet*'}\n\n\n"
+        )
+        bulletin_view=lists.EventView(event_data, "bulletin", False)
+        bulletin_view.add_item(lists.ManageEventButton(event_data, "bulletin"))
 
-    await head_msg.edit(content=bulletin_body,view=bulletin_view)
+        await head_msg.edit(content=bulletin_body,view=bulletin_view)
+    except Exception as e:
+        print(f"ERROR::[update_bulletin_header][{event_data.event_name}:{event_data.event_id}]:: {e}")
+        return
     
 # ## Temporarily removed logic for threads
 #### Generate new bulletin()

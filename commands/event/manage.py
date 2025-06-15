@@ -1,5 +1,5 @@
 import discord
-from core import auth, events, utils, userdata
+from core import auth, events, utils, userdata,bulletins
 from commands.event import lists,register
 from commands.user import timezone
 
@@ -68,6 +68,8 @@ async def _prompt_event_deletion(interaction, guild_id, event_details, return_on
             await inter.response.send_message("❌ You don’t have permission to delete this event.", ephemeral=True)
             return
 
+        if event_details.bulletin_message_id:
+            bulletins.delete_event_bulletin(guild_id,event_details.bulletin_message_id)
         result = events.delete_event(guild_id, event_details.event_id)
         message = (
             f"🪄 Poof! **{event_details.event_name}** successfully deleted"
