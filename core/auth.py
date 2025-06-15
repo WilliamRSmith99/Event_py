@@ -8,9 +8,6 @@ async def authenticate(user: discord.User | discord.Member, organizer_id: int) -
     """
     Returns True if the user is the event organizer or holds a trusted role.
     """
-    if isinstance(user, discord.User):
-        # We need to fetch the member object to check roles
-        return user.id == organizer_id  # fallback: user match only
     
     # Organizer check
     if user.id == organizer_id:
@@ -38,7 +35,7 @@ async def confirm_action(
     if edit_message and not interaction.response.is_done():
         await interaction.response.edit_message(content=prompt, view=view)
     elif edit_message:
-        await interaction.followup.send(content=prompt, view=view, ephemeral=True)
+        await interaction.edit_original_response(content=prompt, view=view)
     else:
         await interaction.response.send_message(prompt, view=view, ephemeral=True)
 

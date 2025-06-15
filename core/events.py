@@ -10,9 +10,9 @@ class EventState:
     event_name: str
     max_attendees: str
     organizer: str
-    organizer_cname: str
-    confirmed_date: str
     event_id: str
+    organizer_cname: str
+    confirmed_dates: list[str] = field(default_factory=list)
     bulletin_channel_id: Optional[int] = None
     bulletin_message_id: Optional[int] = None
     bulletin_thread_id: Optional[int] = None
@@ -30,7 +30,7 @@ class EventState:
             "max_attendees": self.max_attendees,
             "organizer": self.organizer,
             "organizer_cname": self.organizer_cname,
-            "confirmed_date": self.confirmed_date,
+            "confirmed_dates": self.confirmed_dates,
             "bulletin_channel_id": self.bulletin_channel_id,
             "bulletin_message_id": self.bulletin_message_id,
             "bulletin_thread_id": self.bulletin_thread_id,
@@ -50,7 +50,7 @@ class EventState:
             max_attendees=data["max_attendees"],
             organizer=data["organizer"],
             organizer_cname=data["organizer_cname"],
-            confirmed_date=data["confirmed_date"],
+            confirmed_dates=data["confirmed_dates"],
             bulletin_channel_id=data.get("bulletin_channel_id"),
             bulletin_message_id=data.get("bulletin_message_id"),
             bulletin_thread_id=data.get("bulletin_thread_id"),

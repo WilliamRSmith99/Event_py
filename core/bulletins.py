@@ -117,8 +117,7 @@ async def restore_bulletin_views(client: discord.Client):
             try:
                 event = events.get_event_by_id(guild_id,bulletin.event_id)
                 view = lists.EventView(event, "bulletin", False)
-
-                # Add view back to the client
+                view.add_item(lists.ManageEventButton(event, "bulletin"))
                 client.add_view(view, message_id=int(head_msg_id))
                 msg_count+=1
                 ###### THREADING GOES HERE #####
@@ -130,17 +129,20 @@ async def restore_bulletin_views(client: discord.Client):
 async def update_bulletin_header(client: discord.Client, event_data: events.EventState):
     bulletin = client.get_channel(int(event_data.bulletin_channel_id))
     head_msg = await bulletin.fetch_message(int(event_data.bulletin_message_id))
+    event_data = events.get_event_by_id(event_data.guild_id, event_data.event_id)
 
+    if event_data.confirmed_dates:
+        confirmed_availability = { f"{iso_str}" : event_data.availability.get(f"{iso_str}", {}) for iso_str in event_data.confirmed_dates}    
+    confirmed_dates = "\n".join(f"• {d}" for d in lists.group_consecutive_hours_timestamp(confirmed_availability))
     proposed_dates = "\n".join(f"• {d}" for d in lists.group_consecutive_hours_timestamp(event_data.availability))
-
     bulletin_body = (
         f"📅 **Event:** `{event_data.event_name}`\n"
         f"🙋 **Organizer:** <@{event_data.organizer}>\n"
-        f"✅ **Confirmed Date:** *{event_data.confirmed_date or 'TBD'}*\n"
+        f"✅ **Confirmed Dates:** *{confirmed_dates or 'TBD'}*\n"
         f"🗓️ **Proposed Dates (*Your local time*):**\n{proposed_dates or '*None yet*'}\n\n\n"
     )
     bulletin_view=lists.EventView(event_data, "bulletin", False)
-    bulletin_view.add_item(lists.ManageEventButton(event_data))
+    bulletin_view.add_item(lists.ManageEventButton(event_data, "bulletin"))
 
     await head_msg.edit(content=bulletin_body,view=bulletin_view)
     

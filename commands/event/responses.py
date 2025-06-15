@@ -2,12 +2,12 @@ import discord
 from discord.ui import Button, View
 from commands.user import timezone
 from commands.event import lists
-from core import utils, userdata
+from core import utils, userdata, events
 
 MAX_DATES_PER_PAGE = 4
 MAX_TIME_BUTTONS_PER_ROW = 4
 
-async def build_overlap_summary(interaction: discord.Interaction, event_name: str, guild_id: str):
+async def build_overlap_summary(interaction: discord.Interaction, event_id: str, guild_id: str):
     user_tz_str = userdata.get_user_timezone(interaction.user.id)
     if not user_tz_str:
         await utils.safe_send(
@@ -16,23 +16,16 @@ async def build_overlap_summary(interaction: discord.Interaction, event_name: st
             view=timezone.RegionSelectView(interaction.user.id)
         )
         return
-
-    event_matches = event.get_events_by_name(guild_id, event_name)
-    if len(event_matches) == 0:
-        return None, "❌ Event not found."
-    elif len(event_matches) == 1:
-        event = list(event_matches.values())[0]
-        local_availability = utils.from_utc_to_local(event.availability, user_tz_str)
-        view = OverlapSummaryView(event, local_availability, user_tz_str)
-        await interaction.response.send_message(
-            f"📊 Top availability slots for **{event.event_name}**", view=view, ephemeral=True)
+    event = events.get_event_by_id(guild_id, event_id)
+    
+    if event.confirmed_dates:
+        confirmed_availability = { f"{iso_str}" : event.availability.get(f"{iso_str}", {}) for iso_str in event.confirmed_dates}
+        local_availability = utils.from_utc_to_local(confirmed_availability, user_tz_str)
     else:
-        await interaction.response.send_message(
-            f"😬 Oh no! An exact match couldn't be located for `{event_name}`.\n"
-            "Did you mean one of these?", ephemeral=True)
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        for event in event_matches.values():
-            await lists.handle_event_message(interaction, event, context="followup")
+        local_availability = utils.from_utc_to_local(event.availability, user_tz_str)
+    view = OverlapSummaryView(event, local_availability, user_tz_str)
+    await interaction.response.send_message(
+        f"📊 Top availability slots for **{event.event_name}**", view=view, ephemeral=True)
 
 class OverlapSummaryButton(Button):
     def __init__(self, label: str, utc_iso: str, row: int):
@@ -79,7 +72,6 @@ class NavButton(Button):
         self.user_timezone = user_timezone
 
     async def callback(self, interaction: discord.Interaction):
-    # First, adjust values
         date_page = self.parent_view.date_page
         time_page = self.parent_view.time_page
 
@@ -92,21 +84,17 @@ class NavButton(Button):
         elif self.nav_type == "earlier":
             time_page -= 1
 
-        # Clamp values
         total_date_pages = (len(self.parent_view.date_slots) - 1) // MAX_DATES_PER_PAGE + 1
         date_page = max(0, min(date_page, total_date_pages - 1))
 
-        # Compute visible dates
         start_idx = date_page * MAX_DATES_PER_PAGE
         end_idx = start_idx + MAX_DATES_PER_PAGE
         visible_dates = self.parent_view.date_slots[start_idx:end_idx]
 
-        # Compute max time slots among these visible dates only
         max_slots_visible = max((len(slots) for _, slots in visible_dates), default=0)
         total_time_pages = (max_slots_visible - 1) // MAX_TIME_BUTTONS_PER_ROW + 1 if max_slots_visible > 0 else 1
         time_page = max(0, min(time_page, total_time_pages - 1))
 
-        # Re-render with updated pages
         view = OverlapSummaryView(
             event=self.event,
             local_availability=self.parent_view.local_availability,
@@ -155,8 +143,6 @@ class OverlapSummaryView(View):
     def render(self):
         self.clear_items()
         self.total_date_pages = (len(self.date_slots) - 1) // MAX_DATES_PER_PAGE + 1
-        print(f"DEBUG: page={self.date_page}, total={self.total_date_pages}, len(date_slots)={len(self.date_slots)}")
-
         start_idx = self.date_page * MAX_DATES_PER_PAGE
         end_idx = start_idx + MAX_DATES_PER_PAGE
         visible_dates = self.date_slots[start_idx:end_idx]
@@ -179,13 +165,11 @@ class OverlapSummaryView(View):
         if self.show_back_button:
             self.add_item(BackToInfoButton(self.event))
 
-        # Determine max number of time slots across *any* date to paginate horizontally
         max_slots = max((len(slots) for _, slots in self.date_slots), default=0)
         total_time_pages = (max_slots - 1) // MAX_TIME_BUTTONS_PER_ROW + 1 if max_slots > 0 else 1
 
         total_date_pages = (len(self.date_slots) - 1) // MAX_DATES_PER_PAGE + 1
 
-        # --- Nav buttons ---
         self.add_item(NavButton(
             self, "⬅️ Prev Date", "prev_date", self.event,
             row=nav_row,
@@ -193,7 +177,6 @@ class OverlapSummaryView(View):
             disabled=self.date_page == 0
         ))
 
-        # Time slot navs use visible dates
         max_slots = max((len(slots) for _, slots in visible_dates), default=0)
         total_time_pages = (max_slots - 1) // MAX_TIME_BUTTONS_PER_ROW + 1 if max_slots > 0 else 1
 
@@ -215,11 +198,6 @@ class OverlapSummaryView(View):
             user_timezone=self.user_timezone,
             disabled=self.date_page >= total_date_pages - 1
         ))
-        # # Nav buttons
-        # self.add_item(NavButton(self, "⬅️ Prev Date", "prev_date", self.event, row=nav_row, user_timezone=self.user_timezone, disabled=self.date_page == 0))
-        # self.add_item(NavButton(self, "⬅️ Earlier Times", "earlier", self.event, row=nav_row, user_timezone=self.user_timezone, disabled=self.time_page == 0))
-        # self.add_item(NavButton(self, "Later Times ➡️", "later", self.event, row=nav_row, user_timezone=self.user_timezone, disabled=self.time_page >= total_time_pages - 1))
-        # self.add_item(NavButton(self, "Next Date ➡️", "next_date", self.event, row=nav_row, user_timezone=self.user_timezone, disabled=self.date_page >= ((len(self.date_slots) - 1) // MAX_DATES_PER_PAGE)))
 
 class AttendeeView(View):
     def __init__(self, original_view: OverlapSummaryView, utc_iso: str):

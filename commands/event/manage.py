@@ -1,6 +1,7 @@
 import discord
-from core import auth, events
-from commands.event import lists
+from core import auth, events, utils, userdata
+from commands.event import lists,register
+from commands.user import timezone
 
 # ==========================
 #     Delete Event
@@ -101,3 +102,36 @@ async def _prompt_event_deletion(interaction, guild_id, event_details, return_on
 # ==========================
 #       Confirm Event
 # ==========================
+
+async def handle_confirm_dates(interaction: discord.Interaction, event_id: str, context: str):
+    if context not in {"command", "local", "public"}:
+        await interaction.response.send_message("❌ Invalid context provided.", ephemeral=True)
+        return
+
+    event = events.get_event_by_id(interaction.guild.id,event_id)
+    if not event:
+        await interaction.response.send_message("❌ Event not found.", ephemeral=True)
+        return
+    
+    user_tz = userdata.get_user_timezone(interaction.user.id)
+    if not user_tz:
+        await utils.safe_send(
+            interaction,
+            "❌ Timezone not found. Please set your timezone:",
+            view=timezone.RegionSelectView(interaction.user.id)
+        )
+        user_tz = userdata.get_user_timezone(interaction.user.id)
+
+    slots_data_by_date =  utils.from_utc_to_local(event.availability, user_tz)
+    admin_id = interaction.user.id
+    view = register.PaginatedHourSelectionView(
+        event=event,
+        slots_data_by_date=slots_data_by_date,
+        user_id=admin_id,
+        context="confirm"
+    )
+    msg_content = "**Select dates and times to confirm:**"
+    if context in {"command", "public"}:
+        await interaction.response.send_message(content=msg_content, view=view, ephemeral=True)
+    elif context == "local":
+        await interaction.response.edit_message(content=msg_content, view=view)
