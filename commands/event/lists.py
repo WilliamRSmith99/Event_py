@@ -71,11 +71,9 @@ async def handle_event_message(interaction, event, context="followup", inherit_v
     if not user_tz or context == "bulletin":
         user_tz = "*Your local time*"
         
-    if event_data.confirmed_dates:
+    if event_data.confirmed_dates != "TBD" and event_data.confirmed_dates != None :
         confirmed_availability = { f"{iso_str}" : event_data.availability.get(f"{iso_str}", {}) for iso_str in event_data.confirmed_dates}    
-    
-    
-    confirmed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_timestamp(confirmed_availability))
+        confirmed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_timestamp(confirmed_availability))
     proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_timestamp(event_data.availability))
     body = (
         f"📅 **Event:** `{event.event_name}`\n"

@@ -97,7 +97,7 @@ async def schedule_command(interaction: discord.Interaction, event_id: str, cont
             # Get message info for this slot
             event_msg_directory = bulletins.get_event_bulletin(guild_id=event_data.guild_id)
             if not event_data.bulletin_message_id:
-                await interaction.response.edit_message(
+                await interaction.edit_original_response(
                     content=f"✅ Availability updated for **{event_data.event_name}**.",
                     view=None
                 )
