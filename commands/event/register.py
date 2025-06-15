@@ -73,6 +73,7 @@ async def schedule_command(interaction: discord.Interaction, event_id: str, cont
         
         selected_dates = view.selected_utc_keys.copy()
         selected_utc_iso_strs = [iso_str for iso_str, _, _ in selected_dates]
+        changed = False
         for utc_iso_str in selected_utc_iso_strs:
             user_list = event_data.availability.get(utc_iso_str, {})
             if interaction.user.id not in user_list.values():
@@ -142,7 +143,7 @@ class PaginatedHourSelectionView(View):
             processed_slots = []
             for local_dt, utc_iso_str, users in slots:
                 date_key = local_dt.strftime("%A, %m/%d/%y")
-                hour_key = local_dt.strftime("%-I %p")
+                hour_key = local_dt.strftime("%I:00 %p")
                 processed_slots.append((utc_iso_str, local_dt, date_key, hour_key, users))
 
                 if context != "confirm" and user_id in users.values():
@@ -184,10 +185,10 @@ class PaginatedHourSelectionView(View):
         total_pages = (len(slots) - 1) // MAX_TIME_BUTTONS
 
         # Row 4: Navigation
-        self.add_item(NavButton("⏪ Prev Date", "prev_date", disabled=self.current_date_index == 0))
-        self.add_item(NavButton("◀️ Earlier Times", "earlier", disabled=self.page == 0))
-        self.add_item(NavButton("Later Times ▶️", "later", disabled=self.page >= total_pages))
-        self.add_item(NavButton("Next Date ⏩", "next_date", disabled=self.current_date_index >= len(self.date_objs) - 1))
+        self.add_item(NavButton("⏪\u2800\u2800Prev Date\u2800\u2800", "prev_date", disabled=self.current_date_index == 0))
+        self.add_item(NavButton("◀️\u2800Earlier Times\u2800", "earlier", disabled=self.page == 0))
+        self.add_item(NavButton("\u2800Later Times\u2800▶️", "later", disabled=self.page >= total_pages))
+        self.add_item(NavButton("\u2800\u2800Next Date\u2800⏩", "next_date", disabled=self.current_date_index >= len(self.date_objs) - 1))
 
         # Row 5: Select / Submit / Cancel
         self.add_item(SelectAllButton("Select All on Page"))
@@ -199,7 +200,10 @@ class LocalizedHourToggleButton(Button):
         self.utc_iso_str  = utc_iso_str
         self.utc_date_key = date_key
         self.utc_hour_key = hour_key
-        label = f"{hour_key}  [👥 {attendee_count}]" if attendee_count else hour_key
+        if attendee_count:
+            label = f"\u2800{hour_key}  [🎟️ {attendee_count}]\u2800"
+        else:
+            label = f"\u2800\u2800\u2800{hour_key}\u2800\u2800\u2800"
         style = ButtonStyle.success if is_selected else ButtonStyle.secondary
 
         super().__init__(label=label, style=style, custom_id=f"toggle_{date_key}_{hour_key}")
@@ -280,7 +284,10 @@ class NavButton(Button):
 
 class DisabledPaddingButton(Button):
     def __init__(self):
-        super().__init__(label="\u200b", style=discord.ButtonStyle.secondary, disabled=True)
+        desired_char_count = 15
+        label = "⠀."
+        padded_label = "\u2800" * 12 # label + ("\u3000" * (desired_char_count - len(label)))
+        super().__init__(label=padded_label, style=discord.ButtonStyle.secondary, disabled=True)
         
 class SelectAllButton(Button):
     def __init__(self, label="Select All on Page", row=4):

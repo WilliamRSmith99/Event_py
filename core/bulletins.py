@@ -130,10 +130,10 @@ async def update_bulletin_header(client: discord.Client, event_data: events.Even
     bulletin = client.get_channel(int(event_data.bulletin_channel_id))
     head_msg = await bulletin.fetch_message(int(event_data.bulletin_message_id))
     event_data = events.get_event_by_id(event_data.guild_id, event_data.event_id)
-
+    confirmed_dates = None
     if event_data.confirmed_dates:
         confirmed_availability = { f"{iso_str}" : event_data.availability.get(f"{iso_str}", {}) for iso_str in event_data.confirmed_dates}    
-    confirmed_dates = "\n".join(f"• {d}" for d in lists.group_consecutive_hours_timestamp(confirmed_availability))
+        confirmed_dates = "\n".join(f"• {d}" for d in lists.group_consecutive_hours_timestamp(confirmed_availability))
     proposed_dates = "\n".join(f"• {d}" for d in lists.group_consecutive_hours_timestamp(event_data.availability))
     bulletin_body = (
         f"📅 **Event:** `{event_data.event_name}`\n"
