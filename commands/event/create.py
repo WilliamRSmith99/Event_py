@@ -80,7 +80,7 @@ class SelectTimesButton(discord.ui.Button):
             )
             return
         selected_utc_iso_strs = [iso_str for iso_str, _, _ in selected_dates]
-        if not await auth.authenticate(interaction.user, view.event.organizer):
+        if not await auth.authenticate(interaction, view.event.organizer, "organizer"):
             await interaction.edit_original_response("❌ You don’t have permission to edit this event.", ephemeral=True)
             return
         availability = {}

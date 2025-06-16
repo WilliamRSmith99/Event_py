@@ -56,7 +56,7 @@ async def delete_event(interaction: discord.Interaction, guild_id: int, event_na
 
 
 async def _prompt_event_deletion(interaction, guild_id, event_details, return_on_cancel=None):
-    if not await auth.authenticate(interaction.user, event_details.organizer):
+    if not await auth.authenticate(interaction, event_details.organizer, "admin"):
         await interaction.response.send_message("❌ You don’t have permission to delete this event.", ephemeral=True)
         return
 
@@ -64,7 +64,7 @@ async def _prompt_event_deletion(interaction, guild_id, event_details, return_on
         await interaction.response.defer(ephemeral=True)
 
     async def handle_yes(inter: discord.Interaction):
-        if not await auth.authenticate(inter.user, event_details.organizer):
+        if not await auth.authenticate(inter, event_details.organizer, "admin"):
             await inter.response.send_message("❌ You don’t have permission to delete this event.", ephemeral=True)
             return
 

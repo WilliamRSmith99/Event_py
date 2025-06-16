@@ -27,7 +27,7 @@ class PaginatedSettingsView(View):
             self.add_item(SettingsToggleButton(self, label=label))
             self.add_item(SettingsRoleSelect(self, "Admin Roles"))
             self.add_item(SettingsRoleSelect(self, "Event Organizer Roles"))
-            self.add_item(SettingsRoleSelect(self, "Event Attendee Roles"))
+            # self.add_item(SettingsRoleSelect(self, "Event Attendee Roles"))
 
         elif label == "Bulletin":
             self.add_item(SettingsToggleButton(self, label=label))
@@ -57,7 +57,7 @@ class SettingsRoleSelect(RoleSelect):
             min_values=0,
             max_values=25,
             default_values=valid_roles,
-            disabled=getattr(self.parent.config, "roles_and_permissions_settings_enabled", False)
+            disabled= not getattr(self.parent.config, "roles_and_permissions_settings_enabled", False)
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -100,8 +100,8 @@ class SettingsToggleButton(Button):
     def __init__(self, parent: PaginatedSettingsView, label: str):
         self.parent = parent
         self.setting_key = f"{label.lower().replace(' ', '_')}_settings_enabled"
-        self.display_label = f"Enable {label} Settings" if  getattr(parent.config, self.setting_key, False) else f"Disable {label} Settings"
-        style = discord.ButtonStyle.primary if getattr(parent.config, self.setting_key, False) else discord.ButtonStyle.danger
+        self.display_label = f"Disable {label} Settings" if  getattr(parent.config, self.setting_key, False) else f"Enable {label} Settings"
+        style = discord.ButtonStyle.danger if getattr(parent.config, self.setting_key, False) else discord.ButtonStyle.primary
 
         super().__init__(label=self.display_label, style=style, row=0)
 

@@ -1,24 +1,44 @@
 import discord
 from discord.ui import View, Button
 from typing import Callable, Awaitable, Optional
+from core import conf
 # Role names considered trusted for elevated permissions
 TRUSTED_ROLE_NAMES = ["Admin", "Moderator", "Event Organizer", "Host"]
 
-async def authenticate(user: discord.User | discord.Member, organizer_id: int) -> bool:
+async def authenticate(interaction: discord.Interaction, organizer_id: int, auth_level: str) -> bool:
     """
     Returns True if the user is the event organizer or holds a trusted role.
     """
-    
+    admin_roles=[]
+    organizer_roles=[]
+    attendee_roles=[]
+    guild_config = conf.get_config(interaction.guild.id)
+    if guild_config and guild_config.roles_and_permissions_settings_enabled:
+        admin_roles = guild_config.admin_roles
+        organizer_roles = guild_config.event_organizer_roles
+        attendee_roles = guild_config.event_attendee_roles
     # Organizer check
-    if user.id == organizer_id:
+    if interaction.user.id == organizer_id:
         return True
 
+    match auth_level:
+            case "admin":
+                for role in interaction.user.roles:
+                    if role.name in TRUSTED_ROLE_NAMES or role.id in admin_roles or role.name in organizer_roles:                        
+                        return True
+                return False
+            case "organizer":
+                for role in interaction.user.roles:
+                    if role.name in TRUSTED_ROLE_NAMES or role.name in organizer_roles:
+                        return True
+                return False
+            case "attendee":
+                for role in interaction.user.roles:
+                    if role.name in TRUSTED_ROLE_NAMES or role.name in attendee_roles:
+                        return True
+                return False
     # Trusted role check
-    for role in user.roles:
-        if role.name in TRUSTED_ROLE_NAMES:
-            return True
-
-    return False
+    
 
 async def confirm_action(
     interaction: discord.Interaction,

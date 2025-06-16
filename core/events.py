@@ -109,6 +109,7 @@ def get_events_by_name(guild_id: int, name: Optional[str] = None) -> Dict[str, E
         return events
 
     name_lower = name.lower()
+    
     return {
         event_id: event
         for event_id, event in events.items()
@@ -134,7 +135,7 @@ def delete_event(guild_id: str, event_id: str) -> bool:
         save_events(events_list)
         return True
     except KeyError as e:
-        print(f"[delete_event] Event not found: {e}")
+        print(f"ERROR[delete_event] Event not found: {e}")
         return False
 
 def remove_user_from_queue(queue: dict, user_id: str) -> dict:

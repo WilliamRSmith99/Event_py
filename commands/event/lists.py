@@ -88,7 +88,7 @@ async def handle_event_message(interaction, event, context="followup", inherit_v
     else:
         view = EventView(event, context, is_selected=(str(interaction.user.id) in event.rsvp))
 
-        if await auth.authenticate(interaction.user, event.organizer) or context=="bulletin":
+        if await auth.authenticate(interaction, event.organizer, "admin") or context=="bulletin":
             view.add_item(ManageEventButton(event, context=context))
 
     match context:
@@ -191,7 +191,7 @@ class ManageEventButton(Button):
         super().__init__(label="🛠️ Manage Event", style=discord.ButtonStyle.danger, custom_id=f"manage_event:{self.event_name}")
 
     async def callback(self, interaction: discord.Interaction):
-        if not await auth.authenticate(interaction.user, self.event.organizer):
+        if not await auth.authenticate(interaction, self.event.organizer, "admin"):
             await interaction.response.send_message("❌ You don’t have permission to manage this event.", ephemeral=True)
             return
 
@@ -259,7 +259,7 @@ class ManageEventView(utils.ExpiringView):
 
     @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger)
     async def delete_button(self, interaction: discord.Interaction, _):
-        if not await auth.authenticate(interaction.user, self.event.organizer):
+        if not await auth.authenticate(interaction, self.event.organizer, "admin"):
             await interaction.response.send_message("❌ You don’t have permission to delete this event.", ephemeral=True)
             return
 

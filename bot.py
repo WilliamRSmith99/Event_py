@@ -35,49 +35,84 @@ async def event(interaction: discord.Interaction, filter: Optional[str] = None):
     """Command to view events, optionally filter by event name."""
     await lists.event_info(interaction, filter)
     
-@tree.command(name="manage_event", description="Organizer and Admin ONLY: Manage an upcoming event", guild=guild)
-@app_commands.describe(action='one of "edit", "confirm", "delete"', event_name="The event name you want to manage.")
-async def manage_event(interaction: discord.Interaction, event_name: str, action: Literal["edit", "confirm", "delete"]):
-    events_match = events.get_events_by_name(interaction.guild.id, event_name )
-    if len(events_match) == 0:
-        await interaction.response.send_message("❌ Oh no! no events could be matched for `{event_name}`.\nPlease try again.", ephemeral=True)
-        return False
+# @tree.command(name="manage_event", description="Organizer and Admin ONLY: Manage an upcoming event", guild=guild)
+# @app_commands.describe(action='one of "edit", "confirm", "delete"', event_name="The event name you want to manage.")
+# async def manage_event(interaction: discord.Interaction, event_name: str, action: Literal["edit", "confirm", "delete"]):
+#     events_match = events.get_events_by_name(interaction.guild.id, event_name )
+#     if len(events_match) == 0:
+#         await interaction.response.send_message("❌ Oh no! no events could be matched for `{event_name}`.\nPlease try again.", ephemeral=True)
+#         return False
 
-    elif len(events_match) > 1:
-        await interaction.response.send_message(
-            f"😬 Oh no! An exact match couldn't be located for `{event_name}`.\n"
-            "Did you mean one of these?",
-            ephemeral=True
-        )
-        await interaction.response.defer(ephemeral=True)
-        for matched_name, event in events_match.items():
-            view = lists.ManageEventView(event, interaction.guild.id, interaction.user)
-            await lists.handle_event_message(interaction, event, "followup",inherit_view=view)
+#     elif len(events_match) > 1:
+#         await interaction.response.send_message(
+#             f"😬 Oh no! An exact match couldn't be located for `{event_name}`.\n"
+#             "Did you mean one of these?",
+#             ephemeral=True
+#         )
+#         await interaction.response.defer(ephemeral=True)
+#         for matched_name, event in events_match.items():
+#             view = lists.ManageEventView(event, interaction.guild.id, interaction.user)
+#             await lists.handle_event_message(interaction, event, "followup",inherit_view=view)
 
-        return False
+#         return False
 
-    event_name_exact, event_details = lists(events_match.items())[0]
-    match action:
-        case "edit":
-            await interaction.response.send_message("Editing something...")
-        case "confirm":
-            await interaction.response.send_message("Action confirmed!")
-        case "delete":
-            await manage._prompt_event_deletion(interaction, interaction.guild.id, event_details)
-            return True
+#     event_name_exact, event_details = lists(events_match.items())[0]
+#     match action:
+#         case "edit":
+#             await interaction.response.send_message("Editing something...")
+#         case "confirm":
+#             await interaction.response.send_message("Action confirmed!")
+#         case "delete":
+#             await manage._prompt_event_deletion(interaction, interaction.guild.id, event_details)
+#             return True
     
 
-@tree.command(name="event_responses", description="View availability responses for an event", guild=guild)
-@app_commands.describe(event_name="The name of the event you want to view responses for.")
-async def responses(interaction: discord.Interaction, event_name: str):
-    """Command to view the availability responses for an event."""
-    await responses.build_overlap_summary(interaction, event_name, interaction.guild_id)
+# @tree.command(name="event_responses", description="View availability responses for an event", guild=guild)
+# @app_commands.describe(event_name="The name of the event you want to view responses for.")
+# async def responses(interaction: discord.Interaction, event_name: str):
+#     """Command to view the availability responses for an event."""
+#     events_match = events.get_events_by_name(interaction.guild.id, event_name)
+#     if len(events_match) == 0:
+#         await interaction.response.send_message("❌ Oh no! no events could be matched for `{event_name}`.\nPlease try again.", ephemeral=True)
+#         return False
+
+#     elif len(events_match) > 1:
+#         await interaction.response.send_message(
+#             f"😬 Oh no! An exact match couldn't be located for `{event_name}`.\n"
+#             "Did you mean one of these?",
+#             ephemeral=True
+#         )
+#         await interaction.response.defer(ephemeral=True)
+#         for matched_name, event in events_match.items():
+#             view = lists.ManageEventView(event, interaction.guild.id, interaction.user)
+#             await lists.handle_event_message(interaction, event, "followup",inherit_view=view)
+
+#         return False
+#     await responses.build_overlap_summary(interaction, events_match[0].event_id, interaction.guild_id)
     
-@tree.command(name="register", description="Register your availability for an event", guild=guild)
-@app_commands.describe(event_name="The name of the event you want to register for.")
-async def schedule(interaction: discord.Interaction, event_name: str):
-    """Command to register for an event."""
-    await register.schedule_command(interaction, event_name)
+# @tree.command(name="register", description="Register your availability for an event", guild=guild)
+# @app_commands.describe(event_name="The name of the event you want to register for.")
+# async def schedule(interaction: discord.Interaction, event_name: str):
+#     """Command to register for an event."""
+#     events_match = events.get_events_by_name(interaction.guild.id, event_name)
+#     if len(events_match) == 0:
+#         await interaction.response.send_message("❌ Oh no! no events could be matched for `{event_name}`.\nPlease try again.", ephemeral=True)
+#         return False
+
+#     elif len(events_match) > 1:
+#         await interaction.response.send_message(
+#             f"😬 Oh no! An exact match couldn't be located for `{event_name}`.\n"
+#             "Did you mean one of these?",
+#             ephemeral=True
+#         )
+#         await interaction.response.defer(ephemeral=True)
+#         for matched_name, event in events_match.items():
+#             view = lists.ManageEventView(event, interaction.guild.id, interaction.user)
+#             await lists.handle_event_message(interaction, event, "followup",inherit_view=view)
+
+#         return False
+#     await register.schedule_command(interaction, events_match[0].event_id, "register")
+
 # ============================================================
 #                        USER COMMANDS
 # ============================================================
@@ -119,11 +154,11 @@ async def viewtimezone(interaction: discord.Interaction):
             ephemeral=True
         )
 
-@tree.command(name="remindme", description="Schedule a DM reminder for your event", guild=guild)
-@app_commands.describe(event_name="The name of the event you want to be reminded for.")
-async def remindme(interaction: discord.Interaction, event_name: str):
-    """Command to set a DM reminder for an event."""
-    await responses.build_overlap_summary(interaction, event_name, interaction.guild_id)
+# @tree.command(name="remindme", description="Schedule a DM reminder for your event", guild=guild)
+# @app_commands.describe(event_name="The name of the event you want to be reminded for.")
+# async def remindme(interaction: discord.Interaction, event_name: str):
+#     """Command to set a DM reminder for an event."""
+#     await responses.build_overlap_summary(interaction, event_name, interaction.guild_id)
 
 # ============================================================
 #                        BOT EVENTS

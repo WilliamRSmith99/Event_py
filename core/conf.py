@@ -16,7 +16,7 @@ class ServerConfigState:
 
     # Toggleable section settings
     roles_and_permissions_settings_enabled: bool = True
-    bulletin_settings_enabled: bool = False
+    bulletin_settings_enabled: bool = True
     display_settings_enabled: bool = True
 
     def __post_init__(self):
