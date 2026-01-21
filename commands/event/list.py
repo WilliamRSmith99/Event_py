@@ -1,7 +1,7 @@
 from discord.ui import Button
 from datetime import timedelta
 from commands.user import timezone
-from core import auth, events, utils, userdata
+from core import auth, events, utils, userdata, entitlements
 from commands.event import register, responses, manage
 import discord
 
@@ -65,8 +65,17 @@ async def format_single_event(interaction, event, is_edit=False, inherit_view=No
         return
     local_availability = utils.from_utc_to_local(event.availability, user_tz)
     proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_local(local_availability))
+
+    # Build premium badges/indicators
+    badges = []
+    if event.is_recurring:
+        badges.append("🔄 Recurring")
+
+    badge_line = f"✨ {' • '.join(badges)}\n" if badges else ""
+
     body = (
         f"📅 **Event:** `{event.event_name}`\n"
+        f"{badge_line}"
         f"🙋 **Organizer:** <@{event.organizer}>\n"
         f"✅ **Confirmed Date:** *{event.confirmed_date or 'TBD'}*\n"
         f"🗓️ **Proposed Dates (Your Timezone - `{user_tz}`):**\n{proposed_dates or '*None yet*'}\n"
