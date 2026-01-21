@@ -100,8 +100,10 @@ class SettingsToggleButton(Button):
     def __init__(self, parent: PaginatedSettingsView, label: str):
         self.parent = parent
         self.setting_key = f"{label.lower().replace(' ', '_')}_settings_enabled"
-        self.display_label = f"Enable {label} Settings" if  getattr(parent.config, self.setting_key, False) else f"Disable {label} Settings"
-        style = discord.ButtonStyle.primary if getattr(parent.config, self.setting_key, False) else discord.ButtonStyle.danger
+        is_enabled = getattr(parent.config, self.setting_key, False)
+        # Show "Disable" when enabled, "Enable" when disabled
+        self.display_label = f"✅ {label} Enabled" if is_enabled else f"❌ {label} Disabled"
+        style = discord.ButtonStyle.success if is_enabled else discord.ButtonStyle.secondary
 
         super().__init__(label=self.display_label, style=style, row=0)
 

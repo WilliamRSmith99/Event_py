@@ -22,8 +22,15 @@ class TimezoneDropdown(discord.ui.Select):
         """Callback for handling timezone selection or reset."""
         selected = self.values[0]
         userdata.set_user_timezone(interaction.user.id, selected)
-        response_message = f"✅ Timezone set to `{selected}`"
-        
+
+        # Friendly city name from timezone
+        city_name = selected.split("/")[-1].replace("_", " ")
+        response_message = (
+            f"✅ **Timezone Set!**\n\n"
+            f"Your timezone is now **{city_name}** (`{selected}`).\n\n"
+            f"All event times will be shown in your local time."
+        )
+
         # Respond according to whether it's a reset or select operation
         if self.reset:
             await interaction.followup.send(content=response_message, ephemeral=True, view=None)

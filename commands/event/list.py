@@ -150,11 +150,13 @@ class InfoButton(Button):
 
 class NotificationButton(Button):
     def __init__(self, event):
+        self.event = event
         self.event_name = event.event_name
-        super().__init__(label="🔔 Notifications", style=discord.ButtonStyle.secondary, custom_id=f"notifications:{self.event_name}")
+        super().__init__(label="🔔 Remind Me", style=discord.ButtonStyle.secondary, custom_id=f"notifications:{self.event_name}")
 
     async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_message("📅 Notifications for the event are set!", ephemeral=True)
+        from commands.user import notifications as notif_commands
+        await notif_commands.show_notification_settings(interaction, self.event_name)
 
 class ManageEventButton(Button):
     def __init__(self, event, user_tz):
@@ -209,24 +211,25 @@ class ManageEventView(utils.ExpiringView):
         await interaction.response.edit_message(view=view)
         view.message = interaction.message
 
-    @discord.ui.button(label="Edit Event", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="Edit Event", style=discord.ButtonStyle.primary, disabled=True)
     async def edit_button(self, interaction: discord.Interaction, _):
-        await interaction.response.send_message("🔧 Edit Event functionality coming soon!", ephemeral=True)
+        # TODO: Implement edit event flow
+        await interaction.response.defer()
 
-    @discord.ui.button(label="Confirm Datetime", style=discord.ButtonStyle.success)
+    @discord.ui.button(label="Confirm Date", style=discord.ButtonStyle.success, disabled=True)
     async def confirm_button(self, interaction: discord.Interaction, _):
-        await interaction.response.send_message("✅ Confirm Event Datetime functionality coming soon!", ephemeral=True)
+        # TODO: Implement confirm datetime flow
+        await interaction.response.defer()
 
     @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger)
     async def delete_button(self, interaction: discord.Interaction, _):
         if not await auth.authenticate(interaction.user, self.event.organizer):
-            await interaction.response.send_message("❌ You don’t have permission to delete this event.", ephemeral=True)
+            await interaction.response.send_message("❌ You don't have permission to delete this event.", ephemeral=True)
             return
 
         await manage._prompt_event_deletion(
             interaction,
             self.guild_id,
             self.event.event_name,
-            self.event_details,
-            return_on_cancel=format_single_event(interaction, self.event_details)
+            self.event_details
         )

@@ -29,7 +29,7 @@ async def schedule_command(interaction: discord.Interaction, event_name: str, ep
     if not user_tz_str:
         if eph_resp:
             await interaction.response.send_message(
-                "❌ Please set your timezone using `/settimezone` first!",
+                "❌ **Timezone Required**\n\nSelect your timezone below to continue:",
                 view=timezone.RegionSelectView(interaction.user.id),
                 ephemeral=True
             )
@@ -37,7 +37,7 @@ async def schedule_command(interaction: discord.Interaction, event_name: str, ep
         else:
             await utils.safe_send(
                 interaction,
-                "❌ Please set your timezone using `/settimezone` first!",
+                "❌ **Timezone Required**\n\nSelect your timezone below to continue:",
                 view=timezone.RegionSelectView(interaction.user.id)
             )
             return
