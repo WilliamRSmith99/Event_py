@@ -55,6 +55,27 @@ FREE_TIER_MAX_EVENTS = int(os.getenv("FREE_TIER_MAX_EVENTS", "2"))
 PREMIUM_TIER_MAX_EVENTS = int(os.getenv("PREMIUM_TIER_MAX_EVENTS", "999"))  # effectively unlimited
 
 # =============================================================================
+# Stripe Configuration (Phase 5)
+# =============================================================================
+
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
+STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+
+# Stripe Price IDs for subscription plans
+STRIPE_PRICE_MONTHLY = os.getenv("STRIPE_PRICE_MONTHLY")  # e.g., price_xxx
+STRIPE_PRICE_YEARLY = os.getenv("STRIPE_PRICE_YEARLY")    # e.g., price_yyy
+
+# URLs for Stripe checkout
+STRIPE_SUCCESS_URL = os.getenv("STRIPE_SUCCESS_URL", "https://discord.com/channels/@me")
+STRIPE_CANCEL_URL = os.getenv("STRIPE_CANCEL_URL", "https://discord.com/channels/@me")
+
+# Web server for webhooks
+WEB_HOST = os.getenv("WEB_HOST", "0.0.0.0")
+WEB_PORT = int(os.getenv("WEB_PORT", "8080"))
+WEB_BASE_URL = os.getenv("WEB_BASE_URL", f"http://localhost:{WEB_PORT}")
+
+# =============================================================================
 # Validation
 # =============================================================================
 

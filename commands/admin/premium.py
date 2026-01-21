@@ -7,8 +7,9 @@ import discord
 from discord.ui import View, Button
 from typing import Optional
 
-from core import entitlements
+from core import entitlements, stripe_integration
 from core.entitlements import Feature, SubscriptionTier
+from core.stripe_integration import SubscriptionPlan
 from core.logging import get_logger
 import config
 
@@ -192,23 +193,73 @@ class PremiumView(View):
 
     async def _handle_subscribe(self, interaction: discord.Interaction, plan: str):
         """Handle subscription button click."""
-        # In Phase 5, this will redirect to Stripe checkout
-        # For now, show a placeholder message
-        await interaction.response.send_message(
-            f"🚧 **Coming Soon!**\n\n"
-            f"Stripe checkout for the **{plan}** plan will be available soon.\n\n"
-            f"For now, contact the bot developer to enable Premium for your server.",
-            ephemeral=True
+        # Check if Stripe is configured
+        if not stripe_integration.is_stripe_configured():
+            await interaction.response.send_message(
+                "🚧 **Coming Soon!**\n\n"
+                "Online payments are being set up. "
+                "Contact the bot developer to enable Premium for your server.",
+                ephemeral=True
+            )
+            return
+
+        # Determine plan
+        subscription_plan = (
+            SubscriptionPlan.YEARLY if plan == "yearly"
+            else SubscriptionPlan.MONTHLY
         )
+
+        # Create checkout session
+        checkout_url = stripe_integration.create_checkout_session(
+            guild_id=interaction.guild_id,
+            guild_name=interaction.guild.name,
+            plan=subscription_plan
+        )
+
+        if checkout_url:
+            await interaction.response.send_message(
+                f"💳 **Ready to Subscribe!**\n\n"
+                f"Click the link below to complete your **{plan}** subscription:\n\n"
+                f"[Complete Payment]({checkout_url})\n\n"
+                f"*This link expires in 24 hours.*",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                "❌ **Error**\n\n"
+                "Failed to create checkout session. Please try again later.",
+                ephemeral=True
+            )
 
     async def _handle_manage(self, interaction: discord.Interaction):
         """Handle manage subscription button click."""
-        # In Phase 5, this will redirect to Stripe customer portal
-        await interaction.response.send_message(
-            "🚧 **Coming Soon!**\n\n"
-            "Subscription management portal will be available soon.",
-            ephemeral=True
-        )
+        # Check if Stripe is configured
+        if not stripe_integration.is_stripe_configured():
+            await interaction.response.send_message(
+                "🚧 **Coming Soon!**\n\n"
+                "Subscription management portal is being set up.",
+                ephemeral=True
+            )
+            return
+
+        # Create portal session
+        portal_url = stripe_integration.create_portal_session(interaction.guild_id)
+
+        if portal_url:
+            await interaction.response.send_message(
+                f"⚙️ **Manage Your Subscription**\n\n"
+                f"Click the link below to manage your subscription:\n\n"
+                f"[Open Management Portal]({portal_url})\n\n"
+                f"*You can update payment methods, view invoices, or cancel.*",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                "❌ **Error**\n\n"
+                "Failed to create portal session. "
+                "Make sure your server has an active subscription.",
+                ephemeral=True
+            )
 
     async def _handle_compare(self, interaction: discord.Interaction):
         """Show feature comparison."""
