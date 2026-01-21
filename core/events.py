@@ -2,9 +2,51 @@ from core.storage import read_json, write_json_atomic
 from core.logging import get_logger, log_event_action
 from dataclasses import dataclass, field
 from typing import Set, Dict, Any, Optional, Union, Tuple
+from enum import Enum
 import uuid
 
 logger = get_logger(__name__)
+
+
+# ========== Recurring Event Types ==========
+
+class RecurrenceType(Enum):
+    """Types of event recurrence patterns."""
+    NONE = "none"           # One-time event
+    DAILY = "daily"         # Every day
+    WEEKLY = "weekly"       # Same day every week
+    BIWEEKLY = "biweekly"   # Every two weeks
+    MONTHLY = "monthly"     # Same day of month
+
+
+@dataclass
+class RecurrenceConfig:
+    """Configuration for recurring events (Premium feature)."""
+    type: RecurrenceType = RecurrenceType.NONE
+    interval: int = 1  # Every N periods (e.g., every 2 weeks)
+    end_date: Optional[str] = None  # ISO format, None = no end
+    occurrences: Optional[int] = None  # Max occurrences, None = unlimited
+    parent_event_id: Optional[str] = None  # For child instances
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": self.type.value,
+            "interval": self.interval,
+            "end_date": self.end_date,
+            "occurrences": self.occurrences,
+            "parent_event_id": self.parent_event_id,
+        }
+
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> "RecurrenceConfig":
+        return RecurrenceConfig(
+            type=RecurrenceType(data.get("type", "none")),
+            interval=data.get("interval", 1),
+            end_date=data.get("end_date"),
+            occurrences=data.get("occurrences"),
+            parent_event_id=data.get("parent_event_id"),
+        )
+
 
 # ========== Event State Model ==========
 
@@ -16,7 +58,7 @@ class EventState:
     organizer: str
     organizer_cname: str
     confirmed_date: str
-    event_id: Optional[str] = f"{uuid.uuid4()}"
+    event_id: Optional[str] = field(default_factory=lambda: str(uuid.uuid4()))
     bulletin_channel_id: Optional[int] = None
     bulletin_message_id: Optional[int] = None
     bulletin_thread_id: Optional[int] = None
@@ -27,8 +69,11 @@ class EventState:
     availability_to_message_map: Dict[str, Dict[str, Union[int, str]]] = field(default_factory=dict)
     # Format: { utc_iso: { "thread_id": int, "message_id": int, "embed_index": int, "field_name": str } }
 
+    # Premium features
+    recurrence: Optional[RecurrenceConfig] = None  # Recurring event config (Premium)
+
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "guild_id": self.guild_id,
             "event_name": self.event_name,
             "event_id": self.event_id,
@@ -43,15 +88,23 @@ class EventState:
             "slots": self.slots,
             "availability": self.availability,
             "waitlist": self.waitlist,
-            "availability_to_message_map": self.availability_to_message_map
+            "availability_to_message_map": self.availability_to_message_map,
         }
+        # Only include recurrence if set
+        if self.recurrence:
+            result["recurrence"] = self.recurrence.to_dict()
+        return result
 
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> "EventState":
+        recurrence = None
+        if "recurrence" in data and data["recurrence"]:
+            recurrence = RecurrenceConfig.from_dict(data["recurrence"])
+
         return EventState(
             guild_id=data["guild_id"],
             event_name=data["event_name"],
-            event_id=data["event_id"],
+            event_id=data.get("event_id", str(uuid.uuid4())),
             max_attendees=data["max_attendees"],
             organizer=data["organizer"],
             organizer_cname=data["organizer_cname"],
@@ -63,8 +116,14 @@ class EventState:
             slots=data.get("slots", []),
             availability=data.get("availability", {}),
             waitlist=data.get("waitlist", {}),
-            availability_to_message_map=data.get("availability_to_message_map", {})
+            availability_to_message_map=data.get("availability_to_message_map", {}),
+            recurrence=recurrence,
         )
+
+    @property
+    def is_recurring(self) -> bool:
+        """Check if this is a recurring event."""
+        return self.recurrence is not None and self.recurrence.type != RecurrenceType.NONE
 
 DATA_FILE_NAME = "events.json"
 

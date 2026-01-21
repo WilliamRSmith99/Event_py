@@ -7,6 +7,7 @@ import config
 from commands.configs import settings
 from commands.event import manage, register, responses, create, list
 from commands.user import timezone, notifications as notif_commands
+from commands.admin import premium
 from core import auth, utils, events, userdata, bulletins, notifications, logging as bot_logging
 
 # =============================================================================
@@ -146,6 +147,20 @@ async def viewtimezone(interaction: discord.Interaction):
 async def remindme(interaction: discord.Interaction, event_name: str):
     """Command to configure notification preferences for an event."""
     await notif_commands.show_notification_settings(interaction, event_name)
+
+# ============================================================
+#                      PREMIUM COMMANDS
+# ============================================================
+
+@tree.command(name="upgrade", description="View premium features and subscription options", guild=guild)
+async def upgrade(interaction: discord.Interaction):
+    """Command to view premium features and upgrade options."""
+    await premium.show_upgrade_info(interaction)
+
+@tree.command(name="subscription", description="View your server's subscription status", guild=guild)
+async def subscription(interaction: discord.Interaction):
+    """Command to view subscription status (admin only)."""
+    await premium.show_subscription_status(interaction)
 
 # ============================================================
 #                        BOT EVENTS
