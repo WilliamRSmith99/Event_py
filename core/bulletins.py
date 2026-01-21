@@ -1,11 +1,14 @@
 from dataclasses import dataclass, field
 from typing import Dict, Any, Union
 from core.storage import read_json, write_json_atomic
-from core import events,utils
+from core import events, utils
+from core.logging import get_logger, log_event_action
 from datetime import datetime, timedelta
 from commands.event import register
 import discord
 from discord.ui import Button, View
+
+logger = get_logger(__name__)
 
 
 
@@ -123,8 +126,8 @@ async def restore_bulletin_views(client: discord.Client):
                     msg_count+=1
     
             except Exception as e:
-                print(f"⚠️ Failed to restore view for bulletin '{bulletin.event}' in guild {guild_id}: {e}")
-    print(f"Loaded {msg_count} bulletins from disk.")
+                logger.warning(f"Failed to restore view for bulletin '{bulletin.event}' in guild {guild_id}", exc_info=e)
+    logger.info(f"Restored {msg_count} bulletin views from disk")
 
 def format_discord_timestamp(iso_str: str) -> str:
     """Return a Discord full timestamp (<t:...:f>) from UTC ISO string."""
@@ -229,10 +232,10 @@ def generate_single_embed_for_message(event_data, message_id: str) -> discord.Em
                 return embed
     return None
 
-async def generate_new_bulletin(interaction: discord.Interaction,event_data,server_config  ):
+async def generate_new_bulletin(interaction: discord.Interaction, event_data, server_config):
     channel = interaction.guild.get_channel(int(server_config.bulletin_channel))
     if not channel:
-        print("channel not found")
+        logger.warning(f"Bulletin channel not found: {server_config.bulletin_channel} in guild {interaction.guild.id}")
         return  # Skip if channel is not found
     # try:
     event_data.bulletin_channel_id = str(server_config.bulletin_channel)

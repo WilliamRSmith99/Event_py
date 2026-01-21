@@ -1,9 +1,11 @@
 import discord
 from commands.user import timezone
 from core import utils, events, userdata, bulletins
+from core.logging import get_logger, log_event_action
 from discord.ui import Button, View
 from discord import ButtonStyle
 
+logger = get_logger(__name__)
 MAX_TIME_BUTTONS = 20
 
 async def schedule_command(interaction: discord.Interaction, event_name: str, eph_resp: bool = False):
@@ -116,24 +118,6 @@ class PaginatedHourSelectionView(View):
         self.add_item(SubmitAllButton())
         self.add_item(NavButton("Later Times ➡️", "later", disabled=self.page >= total_pages))
         self.add_item(NavButton("Next Date ➡️", "next_date", disabled=self.current_date_index >= len(self.date_objs) - 1))
-        self.clear_items()
-        slots = self.slots_by_date[self.current_date_index]
-        start = self.page * MAX_TIME_BUTTONS
-        end = start + MAX_TIME_BUTTONS
-
-        for utc_iso_str, local_dt, date_key, hour_key, users in slots[start:end]:
-            selected = (utc_iso_str, date_key, hour_key) in self.selected_utc_keys
-            count = len(users)
-            self.add_item(LocalizedHourToggleButton(utc_iso_str, local_dt, date_key, hour_key, selected, count))
-
-        total_pages = (len(slots) - 1) // MAX_TIME_BUTTONS
-
-        # Navigation row
-        self.add_item(NavButton("⬅️ Prev Date", "prev_date", disabled=self.current_date_index == 0))
-        self.add_item(NavButton("⬅️ Earlier Times", "earlier", disabled=self.page == 0))
-        self.add_item(SubmitAllButton())
-        self.add_item(NavButton("Later Times ➡️", "later", disabled=self.page >= total_pages))
-        self.add_item(NavButton("Next Date ➡️", "next_date", disabled=self.current_date_index >= len(self.date_objs) - 1))
 
 
 class LocalizedHourToggleButton(Button):
@@ -178,7 +162,7 @@ class SubmitAllButton(Button):
                 changed = True
          
         for utc_iso_str, user_dict in view.event.availability.items():
-            if utc_iso_str not in selected_utc_iso_strs and view.user_id in user_list.values():
+            if utc_iso_str not in selected_utc_iso_strs and view.user_id in user_dict.values():
                 updated_queue = events.remove_user_from_queue(user_dict, view.user_id)
                 view.event.availability[utc_iso_str] = updated_queue
                 changed = True
@@ -189,7 +173,7 @@ class SubmitAllButton(Button):
             view.event.rsvp.remove(view.user_id)
 
         if changed:
-            print("saving")
+            log_event_action("register", view.event.guild_id, view.event.event_name, user_id=int(view.user_id))
             events.modify_event(view.event)
             # Get message info for this slot
             event_msg_directory = bulletins.get_event_bulletin(guild_id=view.event.guild_id)

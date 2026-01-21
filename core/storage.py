@@ -3,8 +3,7 @@ from pathlib import Path
 import shutil
 from typing import Any
 
-DATA_DIR = Path(__file__).parent / "data"
-DATA_DIR.mkdir(exist_ok=True)
+from config import DATA_DIR
 
 def read_json(file_name: str) -> Any:
     file_path = DATA_DIR / file_name
