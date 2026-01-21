@@ -1,0 +1,21 @@
+# Event Bot Dependencies
+# ======================
+
+# Discord
+discord.py>=2.3.0
+
+# Database
+# SQLite is built into Python, no external dependency needed
+
+# Web Server (for Stripe webhooks)
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+
+# Payments
+stripe>=7.0.0
+
+# Timezone handling
+pytz>=2023.3
+
+# Utilities
+python-dotenv>=1.0.0  # For loading .env files

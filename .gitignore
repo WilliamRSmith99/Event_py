@@ -2,7 +2,8 @@ lib*/*
 discord/*
 core/data/*
 .env
-.env.*
+# Keep .env.example tracked
+!.env.example
 __pycache__
 */__pycache__/*
 __pycache__/
