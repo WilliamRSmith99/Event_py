@@ -13,7 +13,7 @@ async def build_overlap_summary(interaction: discord.Interaction, event_name: st
     if not user_tz_str:
         await utils.safe_send(
             interaction,
-            "❌ Please set your timezone using `/settimezone` first!",
+            "❌ **Timezone Required**\n\nSelect your timezone below to continue:",
             view=timezone.RegionSelectView(interaction.user.id)
         )
         return

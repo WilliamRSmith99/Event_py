@@ -28,7 +28,7 @@ def create_premium_embed(guild_id: int) -> discord.Embed:
     if is_premium:
         embed = discord.Embed(
             title="✨ Premium Active",
-            description="Thank you for supporting Event Bot!",
+            description="Thank you for supporting Overlap!",
             color=discord.Color.gold()
         )
         embed.add_field(
@@ -93,39 +93,7 @@ def create_premium_embed(guild_id: int) -> discord.Embed:
             inline=False
         )
 
-    embed.set_footer(text="Event Bot Premium")
-    return embed
-
-
-def create_feature_comparison_embed() -> discord.Embed:
-    """Create a detailed feature comparison embed."""
-    embed = discord.Embed(
-        title="📊 Feature Comparison",
-        color=discord.Color.blue()
-    )
-
-    features = [
-        ("Active Events", "2", "Unlimited"),
-        ("Basic Scheduling", "✅", "✅"),
-        ("Timezone Support", "✅", "✅"),
-        ("Public Bulletins", "✅", "✅"),
-        ("Basic Notifications", "✅", "✅"),
-        ("Recurring Events", "❌", "✅"),
-        ("Availability Memory", "❌", "✅"),
-        ("Advanced Notifications", "❌", "✅"),
-        ("Priority Support", "❌", "✅"),
-    ]
-
-    free_col = []
-    premium_col = []
-
-    for feature, free_val, premium_val in features:
-        free_col.append(f"{feature}: {free_val}")
-        premium_col.append(f"{feature}: {premium_val}")
-
-    embed.add_field(name="Free", value="\n".join(free_col), inline=True)
-    embed.add_field(name="Premium", value="\n".join(premium_col), inline=True)
-
+    embed.set_footer(text="Overlap — schedule together, without the back-and-forth")
     return embed
 
 
@@ -163,12 +131,6 @@ class PremiumView(View):
                 emoji="⚙️"
             ))
 
-        self.add_item(Button(
-            label="Compare Features",
-            style=discord.ButtonStyle.secondary,
-            custom_id="compare_features",
-            emoji="📊"
-        ))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         custom_id = interaction.data.get("custom_id", "")
@@ -183,10 +145,6 @@ class PremiumView(View):
 
         if custom_id == "manage_subscription":
             await self._handle_manage(interaction)
-            return False
-
-        if custom_id == "compare_features":
-            await self._handle_compare(interaction)
             return False
 
         return True
@@ -217,11 +175,20 @@ class PremiumView(View):
         )
 
         if checkout_url:
+            # Create a view with a URL button for better UX
+            view = View(timeout=300)
+            view.add_item(Button(
+                label=f"Complete {plan.title()} Subscription",
+                style=discord.ButtonStyle.link,
+                url=checkout_url,
+                emoji="💳"
+            ))
+
             await interaction.response.send_message(
                 f"💳 **Ready to Subscribe!**\n\n"
-                f"Click the link below to complete your **{plan}** subscription:\n\n"
-                f"[Complete Payment]({checkout_url})\n\n"
+                f"Click the button below to complete your **{plan}** subscription.\n\n"
                 f"*This link expires in 24 hours.*",
+                view=view,
                 ephemeral=True
             )
         else:
@@ -246,11 +213,19 @@ class PremiumView(View):
         portal_url = stripe_integration.create_portal_session(interaction.guild_id)
 
         if portal_url:
+            # Create a view with a URL button for better UX
+            view = View(timeout=300)
+            view.add_item(Button(
+                label="Open Management Portal",
+                style=discord.ButtonStyle.link,
+                url=portal_url,
+                emoji="⚙️"
+            ))
+
             await interaction.response.send_message(
                 f"⚙️ **Manage Your Subscription**\n\n"
-                f"Click the link below to manage your subscription:\n\n"
-                f"[Open Management Portal]({portal_url})\n\n"
-                f"*You can update payment methods, view invoices, or cancel.*",
+                f"Update payment methods, view invoices, or cancel anytime.",
+                view=view,
                 ephemeral=True
             )
         else:
@@ -260,12 +235,6 @@ class PremiumView(View):
                 "Make sure your server has an active subscription.",
                 ephemeral=True
             )
-
-    async def _handle_compare(self, interaction: discord.Interaction):
-        """Show feature comparison."""
-        embed = create_feature_comparison_embed()
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
 
 # =============================================================================
 # Command Handlers
@@ -283,32 +252,76 @@ async def show_upgrade_info(interaction: discord.Interaction):
     )
 
 
+class SubscriptionStatusView(View):
+    """View for subscription status with contextual actions."""
+
+    def __init__(self, guild_id: int, portal_url: Optional[str] = None):
+        super().__init__(timeout=300)
+        self.guild_id = guild_id
+
+        is_premium = entitlements.is_premium(guild_id)
+
+        if is_premium and portal_url:
+            # Premium user: show manage button
+            self.add_item(Button(
+                label="Manage Subscription",
+                style=discord.ButtonStyle.link,
+                url=portal_url,
+                emoji="⚙️"
+            ))
+        elif not is_premium:
+            # Free user: show upgrade button
+            self.add_item(Button(
+                label="Upgrade to Premium",
+                style=discord.ButtonStyle.primary,
+                custom_id="show_upgrade_from_status",
+                emoji="⭐"
+            ))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        custom_id = interaction.data.get("custom_id", "")
+
+        if custom_id == "show_upgrade_from_status":
+            embed = create_premium_embed(self.guild_id)
+            view = PremiumView(self.guild_id)
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            return False
+
+        return True
+
+
 async def show_subscription_status(interaction: discord.Interaction):
     """Show current subscription status (admin only)."""
     guild_id = interaction.guild_id
     is_premium = entitlements.is_premium(guild_id)
     tier = entitlements.get_tier(guild_id)
 
+    portal_url = None
+
     if is_premium:
         sub_info = entitlements.get_subscription_info(guild_id)
         expires_str = "Never" if not sub_info.expires_at else f"<t:{int(sub_info.expires_at.timestamp())}:F>"
 
         message = (
-            f"**Subscription Status**\n\n"
+            f"✨ **Subscription Status**\n\n"
             f"Tier: **{tier.value.title()}**\n"
             f"Status: **Active** ✅\n"
-            f"Expires: {expires_str}"
+            f"Renews: {expires_str}"
         )
+
+        # Get portal URL if Stripe is configured
+        if stripe_integration.is_stripe_configured():
+            portal_url = stripe_integration.create_portal_session(guild_id)
     else:
         event_limit = entitlements.get_event_limit(guild_id)
         from core import events
         current_events = len(events.get_events(guild_id))
 
         message = (
-            f"**Subscription Status**\n\n"
+            f"📋 **Subscription Status**\n\n"
             f"Tier: **Free**\n"
-            f"Events: **{current_events}/{event_limit}**\n\n"
-            f"Use `/upgrade` to unlock unlimited events!"
+            f"Events: **{current_events}/{event_limit}**"
         )
 
-    await interaction.response.send_message(message, ephemeral=True)
+    view = SubscriptionStatusView(guild_id, portal_url)
+    await interaction.response.send_message(message, view=view, ephemeral=True)

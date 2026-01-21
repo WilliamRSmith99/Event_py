@@ -4,6 +4,7 @@ Web Server for Event Bot.
 FastAPI-based web server for:
 - Stripe webhook handling
 - Health checks
+- Static pages (success/cancel)
 - Optional: OAuth flows, admin dashboard
 
 Run standalone:
@@ -15,6 +16,7 @@ Or integrate with bot:
 """
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 import config
@@ -23,10 +25,14 @@ from core import stripe_integration
 
 logger = get_logger(__name__)
 
+# Static files directory
+STATIC_DIR = Path(__file__).parent / "static"
+
 # FastAPI import (optional dependency)
 try:
     from fastapi import FastAPI, Request, HTTPException, Header
-    from fastapi.responses import JSONResponse
+    from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
+    from fastapi.staticfiles import StaticFiles
     import uvicorn
     FASTAPI_AVAILABLE = True
 except ImportError:
@@ -56,8 +62,8 @@ def create_app() -> Optional["FastAPI"]:
         return None
 
     app = FastAPI(
-        title="Event Bot API",
-        description="Web API for Event Bot premium subscriptions",
+        title="Overlap API",
+        description="Schedule together, without the back-and-forth",
         version="1.0.0",
         lifespan=lifespan
     )
@@ -71,7 +77,7 @@ def create_app() -> Optional["FastAPI"]:
         """Basic health check endpoint."""
         return {
             "status": "healthy",
-            "service": "event-bot-api"
+            "service": "overlap-api"
         }
 
     @app.get("/health/stripe")
@@ -177,6 +183,34 @@ def create_app() -> Optional["FastAPI"]:
             )
 
     # ==========================================================================
+    # Static Pages (Checkout Success/Cancel)
+    # ==========================================================================
+
+    @app.get("/success")
+    async def checkout_success():
+        """Page shown after successful checkout."""
+        success_file = STATIC_DIR / "success.html"
+        if success_file.exists():
+            return FileResponse(success_file, media_type="text/html")
+        return HTMLResponse(
+            "<h1>Payment Successful!</h1>"
+            "<p>Thank you! Your premium subscription is now active.</p>"
+            "<p><a href='https://discord.com/channels/@me'>Return to Discord</a></p>"
+        )
+
+    @app.get("/cancel")
+    async def checkout_cancel():
+        """Page shown when checkout is cancelled."""
+        cancel_file = STATIC_DIR / "cancel.html"
+        if cancel_file.exists():
+            return FileResponse(cancel_file, media_type="text/html")
+        return HTMLResponse(
+            "<h1>Checkout Cancelled</h1>"
+            "<p>No worries! You can upgrade anytime with /upgrade in Discord.</p>"
+            "<p><a href='https://discord.com/channels/@me'>Return to Discord</a></p>"
+        )
+
+    # ==========================================================================
     # Info Endpoints
     # ==========================================================================
 
@@ -184,16 +218,23 @@ def create_app() -> Optional["FastAPI"]:
     async def root():
         """Root endpoint with API information."""
         return {
-            "name": "Event Bot API",
+            "name": "Overlap",
+            "tagline": "Schedule together, without the back-and-forth",
             "version": "1.0.0",
             "endpoints": {
                 "health": "/health",
                 "stripe_health": "/health/stripe",
                 "stripe_webhook": "/webhooks/stripe",
                 "create_checkout": "/checkout/create",
-                "create_portal": "/portal/create"
+                "create_portal": "/portal/create",
+                "success": "/success",
+                "cancel": "/cancel"
             }
         }
+
+    # Mount static files if directory exists
+    if STATIC_DIR.exists():
+        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     return app
 
