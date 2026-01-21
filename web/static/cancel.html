@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Checkout Cancelled - Event Bot</title>
+    <title>Checkout Cancelled - Overlap</title>
     <style>
         * {
             margin: 0;
@@ -107,6 +107,13 @@
             font-size: 13px;
             margin-top: 24px;
         }
+        .brand {
+            color: #aaa;
+            font-size: 12px;
+            margin-top: 32px;
+            padding-top: 16px;
+            border-top: 1px solid #eee;
+        }
     </style>
 </head>
 <body>
@@ -128,9 +135,12 @@
 
         <div class="buttons">
             <a href="https://discord.com/channels/@me" class="button button-primary">Return to Discord</a>
+            <a href="javascript:history.back()" class="button button-secondary">Try Again</a>
         </div>
 
         <p class="note">You can try the free tier with up to 2 events.<br>Use /upgrade in Discord when you're ready to unlock more.</p>
+
+        <div class="brand">Overlap &mdash; schedule together, without the back-and-forth</div>
     </div>
 </body>
 </html>

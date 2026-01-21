@@ -62,8 +62,8 @@ def create_app() -> Optional["FastAPI"]:
         return None
 
     app = FastAPI(
-        title="Event Bot API",
-        description="Web API for Event Bot premium subscriptions",
+        title="Overlap API",
+        description="Schedule together, without the back-and-forth",
         version="1.0.0",
         lifespan=lifespan
     )
@@ -77,7 +77,7 @@ def create_app() -> Optional["FastAPI"]:
         """Basic health check endpoint."""
         return {
             "status": "healthy",
-            "service": "event-bot-api"
+            "service": "overlap-api"
         }
 
     @app.get("/health/stripe")
@@ -218,7 +218,8 @@ def create_app() -> Optional["FastAPI"]:
     async def root():
         """Root endpoint with API information."""
         return {
-            "name": "Event Bot API",
+            "name": "Overlap",
+            "tagline": "Schedule together, without the back-and-forth",
             "version": "1.0.0",
             "endpoints": {
                 "health": "/health",

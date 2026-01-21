@@ -1,10 +1,12 @@
 # Stripe Integration Setup Guide
 
-This guide walks you through setting up Stripe for Event Bot's premium subscriptions.
+This guide walks you through setting up Stripe for Overlap's premium subscriptions.
+
+> **Overlap** — Schedule together, without the back-and-forth
 
 ## Overview
 
-Event Bot uses Stripe for:
+Overlap uses Stripe for:
 - **Checkout Sessions**: One-time payment flow for new subscribers
 - **Customer Portal**: Self-service subscription management
 - **Webhooks**: Automatic subscription lifecycle updates
@@ -12,7 +14,7 @@ Event Bot uses Stripe for:
 ## Prerequisites
 
 1. A Stripe account (sign up at https://stripe.com)
-2. Event Bot deployed and running
+2. Overlap deployed and running
 3. A domain with HTTPS for webhooks (or ngrok for local testing)
 
 ## Step 1: Create Stripe Products & Prices
@@ -22,7 +24,7 @@ Event Bot uses Stripe for:
 1. Go to **Products** > **Add product**
 
 2. Create the product:
-   - **Name**: Event Bot Premium
+   - **Name**: Overlap Premium
    - **Description**: Unlock unlimited events, recurring events, and more!
 
 3. Add pricing:
@@ -256,4 +258,4 @@ Before accepting real payments:
 
 - Stripe Documentation: https://stripe.com/docs
 - Stripe Support: https://support.stripe.com
-- Event Bot Issues: https://github.com/your-repo/issues
+- Overlap Issues: https://github.com/your-repo/issues

@@ -28,7 +28,7 @@ def create_premium_embed(guild_id: int) -> discord.Embed:
     if is_premium:
         embed = discord.Embed(
             title="✨ Premium Active",
-            description="Thank you for supporting Event Bot!",
+            description="Thank you for supporting Overlap!",
             color=discord.Color.gold()
         )
         embed.add_field(
@@ -93,7 +93,7 @@ def create_premium_embed(guild_id: int) -> discord.Embed:
             inline=False
         )
 
-    embed.set_footer(text="Event Bot Premium")
+    embed.set_footer(text="Overlap — schedule together, without the back-and-forth")
     return embed
 
 
