@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 from typing import Optional, Literal
 import sys
+import asyncio
 
 import config
 from commands.configs import settings
@@ -9,6 +10,8 @@ from commands.event import manage, register, responses, create, list
 from commands.user import timezone, notifications as notif_commands
 from commands.admin import premium
 from core import auth, utils, events, userdata, bulletins, notifications, logging as bot_logging
+from core.database import init_database
+from core.stripe_integration import is_stripe_configured
 
 # =============================================================================
 # Validate Configuration
@@ -171,6 +174,12 @@ async def on_ready():
     """Event triggered when the bot is ready and connected."""
     logger.info(f"Logged in as {client.user}")
 
+    # Initialize SQLite database
+    logger.info("Initializing database...")
+    init_database()
+    logger.info("Database initialized")
+
+    # Sync slash commands
     if guild:
         await tree.sync(guild=guild)
         logger.info(f"Slash commands synced to dev guild: {config.DEV_GUILD_ID}")
@@ -182,6 +191,17 @@ async def on_ready():
 
     # Start notification scheduler
     notifications.init_scheduler(client)
+
+    # Start web server for Stripe webhooks (if configured)
+    if is_stripe_configured():
+        try:
+            from web.server import start_web_server
+            asyncio.create_task(start_web_server())
+            logger.info(f"Web server started on {config.WEB_HOST}:{config.WEB_PORT}")
+        except ImportError:
+            logger.warning("Web server dependencies not installed (fastapi, uvicorn)")
+    else:
+        logger.info("Stripe not configured, web server not started")
 
     logger.info("Bot is ready!")
 
