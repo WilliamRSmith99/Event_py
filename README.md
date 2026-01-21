@@ -1,132 +1,201 @@
-# 🗓️ Discord Event Scheduler Bot
+# Overlap
 
-A Discord bot that allows users to **create**, **register**, **view**, and **manage events** within a server. Users can also set their timezones, get reminders, and track availability across members.
+> Schedule together, without the back-and-forth.
 
-## 🚀 Features
+A Discord bot for coordinating group events. Create events, propose times, collect availability, and find when everyone can meet.
 
-- 🆕 Create new events with a slash command.
-- 📋 Register your availability for any event.
-- 🔎 View upcoming events or filter by name.
-- 🗑️ Delete events with confirmation prompts.
-- 🌍 Set and manage your timezone for accurate scheduling.
-- 📊 View overlap and response summaries.
-- 🔔 DM reminders for upcoming events.
+## Features
 
-## 🛠️ Commands
+### Core Scheduling
+- **Create Events** - Launch a wizard to set up events with proposed dates and times
+- **Smart Availability** - Users select times they're free, bot finds the overlap
+- **Timezone Support** - All times shown in each user's local timezone
+- **Public Bulletins** - Optionally post events to a channel for visibility
 
-### 📆 Event Management
+### Notifications
+- **Customizable Reminders** - Get notified 15min, 1hr, or 1 day before events
+- **Event Updates** - Notifications when events change or get canceled
+- **Per-Event Settings** - Configure notifications for each event individually
+
+### Premium Features
+- **Unlimited Events** - Free tier: 2 active events, Premium: unlimited
+- **Recurring Events** - Weekly, biweekly, monthly schedules
+- **Availability Memory** - Bot learns your typical availability patterns
+- **Priority Support** - Direct support channel access
+
+## Commands
+
+### Event Management
 
 | Command | Description |
-|--------|-------------|
-| `/newevent` | Launch a modal to create a new event |
-| `/events [event_name]` | View upcoming events (optionally filtered by name) |
-| `/upcoming` | View all upcoming events |
-| `/delete [event_name]` | Delete an existing event (with confirmation) |
+|---------|-------------|
+| `/newevent` | Create a new event with date/time wizard |
+| `/events [name]` | View all events or search by name |
+| `/delete <name>` | Delete an event (organizer only) |
 
-### 👤 User Actions
+### User Actions
 
 | Command | Description |
-|--------|-------------|
-| `/register <event_name>` | Register your availability for an event |
-| `/responses <event_name>` | View response and overlap summary for an event |
-| `/remindme <event_name>` | Schedule a DM reminder for an event |
-| `/timezone` | View or update your timezone setting |
+|---------|-------------|
+| `/register <event>` | Select your available times for an event |
+| `/responses <event>` | View availability overlap summary |
+| `/remindme <event>` | Configure notification preferences |
+| `/timezone` | Set your timezone for accurate scheduling |
 
-## 🧠 How It Works
+### Admin
 
-- Events are stored with proposed date and time options.
-- Users register by selecting the time slots they’re available.
-- Timezone is used to convert UTC to user-local time.
-- The bot computes the best overlap between users for organizers.
-- Safe UI interactions via Discord’s `discord.ui` views.
-- Built-in confirmation steps for destructive actions like deletions.
+| Command | Description |
+|---------|-------------|
+| `/settings` | Configure bot settings for your server |
+| `/upgrade` | View premium features and subscribe |
+| `/subscription` | Check subscription status |
 
-## 📦 Project Structure
+## Quick Start
 
-```
-bot.py
-README.md
+### 1. Install Dependencies
 
-commands/
-├── events/                    # All user-facing event interactions
-│   ├── __init__.py
-│   ├── create.py
-│   ├── register.py
-│   ├── view.py
-│   └── manage.py              # e.g. edit, confirm, delete, info
-├── timezone/
-│   ├── __init__.py
-│   ├── handlers.py
-│   └── tz_data.json
-├── __init__.py
-
-core/                          # Central app logic and utilities
-├── data/
-│   ├── events.json
-│   ├── user_data.json
-│   ├── user_timezones.json
-├── storage.py                 # Reads/writes JSON files
-├── event_state.py            # EventState dataclass & helpers
-├── user_state.py             # User timezone preferences
-├── auth.py                   # Permission/auth helper (formerly shared.py)
-├── utils.py                  # General helpers
-├── __init__.py
-
-ui/                            # Views and buttons (discord.ui components)
-├── event_views.py
-├── manage_views.py
-└── __init__.py
+```bash
+pip install -r requirements.txt
 ```
 
-## ⚙️ Setup & Installation
+### 2. Configure Environment
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/WilliamRSmith99/discord-event-bot.git
-   cd discord-event-bot
-   ```
+Copy `.env.example` to `.env` and fill in your values:
 
-2. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+```bash
+cp .env.example .env
+```
 
-3. **Environment Setup**
-   Create a `.env` file or set the following environment variable:
-   ```
-   DISCORD_TOKEN=your_bot_token_here
-   ```
+Required:
+```env
+DISCORD_TOKEN=your_discord_bot_token
+```
 
-4. **Run the bot**
-   ```bash
-   python bot.py
-   ```
+Optional (for premium features):
+```env
+STRIPE_SECRET_KEY=sk_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_PRICE_MONTHLY=price_...
+STRIPE_PRICE_YEARLY=price_...
+```
 
-## ✅ Requirements
+### 3. Run the Bot
 
-- Python 3.9+
-- Discord.py 2.0+ (`py-cord` or official fork with slash command support)
-- Permissions to create slash commands on your server
-- Optional: dotenv for managing environment variables
+```bash
+python bot.py
+```
 
-## 🔐 Permissions Required
+## Project Structure
 
-The bot requires the following permissions to function properly:
-- Read Messages / Message History
-- Send Messages / Embed Links
+```
+overlap/
+├── bot.py                    # Main entry point
+├── config.py                 # Environment configuration
+├── requirements.txt          # Python dependencies
+│
+├── commands/                 # Slash command handlers
+│   ├── event/               # Event management (create, list, register)
+│   ├── user/                # User commands (timezone, notifications)
+│   ├── admin/               # Admin commands (settings, premium)
+│   └── configs/             # Server configuration
+│
+├── core/                    # Business logic
+│   ├── events.py           # Event state and operations
+│   ├── userdata.py         # User timezone storage
+│   ├── notifications.py    # Notification system
+│   ├── entitlements.py     # Premium feature checks
+│   ├── bulletins.py        # Public event announcements
+│   ├── database.py         # SQLite database schema
+│   ├── stripe_integration.py # Payment processing
+│   └── repositories/       # Data access layer
+│
+├── web/                     # Web server for Stripe webhooks
+│   ├── server.py           # FastAPI application
+│   └── static/             # Checkout success/cancel pages
+│
+├── scripts/                 # Utility scripts
+│   └── migrate_json_to_sqlite.py
+│
+└── docs/                    # Documentation
+    └── STRIPE_SETUP.md     # Stripe configuration guide
+```
+
+## Configuration
+
+### Server Settings
+
+Admins can configure:
+- **Roles & Permissions** - Who can create events, who can RSVP
+- **Bulletin Channel** - Where to post public event announcements
+- **Display Options** - Customize how events appear
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DISCORD_TOKEN` | Yes | Your Discord bot token |
+| `ENV` | No | `development` or `production` |
+| `DEV_GUILD_ID` | No | Restrict commands to one server (faster sync) |
+| `DATA_DIR` | No | Where to store database (default: `./data`) |
+| `LOG_LEVEL` | No | Logging verbosity (default: `INFO`) |
+
+See `.env.example` for all options including Stripe configuration.
+
+## Premium & Payments
+
+Overlap uses Stripe for premium subscriptions. See [docs/STRIPE_SETUP.md](docs/STRIPE_SETUP.md) for setup instructions.
+
+### Pricing
+- **Monthly**: $5/month
+- **Yearly**: $50/year (save 17%)
+
+### Web Server
+
+The bot includes a FastAPI server for Stripe webhooks. See [WEB_SERVER.md](WEB_SERVER.md) for details.
+
+## Requirements
+
+- Python 3.10+
+- discord.py 2.3+
+- SQLite (included with Python)
+- FastAPI + Uvicorn (for premium features)
+- Stripe account (for payments)
+
+## Permissions
+
+The bot needs these Discord permissions:
+- Read Messages / View Channels
+- Send Messages
+- Embed Links
 - Use Slash Commands
-- Manage Messages (for editing/deleting ephemeral responses)
+- Create Public Threads (for bulletins)
+- Manage Threads (for bulletins)
 
-## 📎 Notes
+## Development
 
-- Max 25 options are shown due to Discord API limits (e.g., timezone selection).
-- All operations like registration and timezone selection are ephemeral to preserve privacy.
-- Responses are stored server-side (via the `database/` logic).
+### Database Migration
 
-## 🤝 Contributing
+If migrating from JSON storage to SQLite:
 
-Pull requests are welcome! For major changes, please open an issue first to discuss what you would like to change.
+```bash
+python scripts/migrate_json_to_sqlite.py --dry-run  # Preview changes
+python scripts/migrate_json_to_sqlite.py            # Run migration
+```
+
+### Running Tests
+
+```bash
+pytest tests/
+```
+
+## Contributing
+
+Pull requests welcome! Please open an issue first for major changes.
+
+## License
+
+MIT
 
 ---
 
-**Made with ❤️ for efficient community event coordination.**
+**Overlap** - Schedule together, without the back-and-forth.
