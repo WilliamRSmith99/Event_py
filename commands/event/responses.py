@@ -1,8 +1,10 @@
 import discord
 from discord.ui import Button, View
 from commands.user import timezone
-from core import utils, userdata
+from core import utils, userdata, events
+from core.logging import get_logger
 
+logger = get_logger(__name__)
 MAX_DATES_PER_PAGE = 4
 MAX_TIME_BUTTONS_PER_ROW = 4
 
@@ -16,7 +18,7 @@ async def build_overlap_summary(interaction: discord.Interaction, event_name: st
         )
         return
 
-    event_matches = event.get_events(guild_id, event_name)
+    event_matches = events.get_events(guild_id, event_name)
     if len(event_matches) == 0:
         return None, "❌ Event not found."
     elif len(event_matches) == 1:
@@ -156,7 +158,7 @@ class OverlapSummaryView(View):
     def render(self):
         self.clear_items()
         self.total_date_pages = (len(self.date_slots) - 1) // MAX_DATES_PER_PAGE + 1
-        print(f"DEBUG: page={self.date_page}, total={self.total_date_pages}, len(date_slots)={len(self.date_slots)}")
+        logger.debug(f"Rendering overlap view: page={self.date_page}, total={self.total_date_pages}, date_slots={len(self.date_slots)}")
 
         start_idx = self.date_page * MAX_DATES_PER_PAGE
         end_idx = start_idx + MAX_DATES_PER_PAGE

@@ -25,7 +25,7 @@ class DeleteEventConfirmView(discord.ui.View):
         )
 
 async def delete_event(interaction: discord.Interaction, guild_id: int, event_name: str) -> bool:
-    events_found = event.get_events(guild_id, event_name)
+    events_found = events.get_events(guild_id, event_name)
 
     if len(events_found) == 0:
         await interaction.response.send_message("❌ Failure! Unable to locate event.", ephemeral=True)

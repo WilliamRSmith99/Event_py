@@ -2,7 +2,10 @@ import pytz, discord
 from typing import Optional
 from datetime import datetime, timezone
 from core import storage
+from core.logging import get_logger
 from collections import defaultdict
+
+logger = get_logger(__name__)
 
 # ========== Time Conversion Utilities ==========
 def to_utc_isoformat(datetime_str: str, user_timezone: str) -> str:
@@ -15,7 +18,7 @@ def to_utc_isoformat(datetime_str: str, user_timezone: str) -> str:
         localized = local_tz.localize(naive)
         return localized.astimezone(pytz.utc).isoformat()  # Convert to UTC and return ISO format
     except Exception as e:
-        print(f"Error in to_utc_isoformat: {e}")
+        logger.warning(f"Error converting to UTC: {datetime_str}", exc_info=e)
         return datetime_str  # Return the original string if an error occurs
 
 
@@ -61,7 +64,7 @@ def parse_utc_availability_key(utc_date_str: str, utc_hour_str: str) -> Optional
         naive = datetime.strptime(combined, "%A, %m/%d/%y %I%p")
         return pytz.utc.localize(naive)
     except ValueError as e:
-        print(f"[parse_utc_availability_key] Invalid datetime: {combined} - {e}")
+        logger.warning(f"Invalid datetime format: {combined}", exc_info=e)
         return None
 
 def to_discord_timestamp(dt: datetime, style: str = 't') -> str:

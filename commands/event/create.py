@@ -1,8 +1,12 @@
 import discord, uuid
-from core import utils, events, userdata, conf, bulletins
+from core import utils, events, userdata, conf, bulletins, entitlements
+from core.logging import get_logger, log_event_action
+from core.exceptions import EventLimitReachedError, EventAlreadyExistsError
 from datetime import datetime, timedelta
 from commands.user import timezone
 from commands.event import list as ls
+
+logger = get_logger(__name__)
 
 
 def GenerateProposedDates(target: str = None):
@@ -129,7 +133,7 @@ class SubmitTimeButton(discord.ui.Button):
                 self.event_data.availability[utc_iso] = {}
 
             except Exception as e:
-                print(f"Failed to parse {datetime_str}: {e}")
+                logger.warning(f"Failed to parse datetime: {datetime_str}", exc_info=e)
 
         events.modify_event(self.event_data)
         
@@ -221,6 +225,29 @@ class NewEventModal(discord.ui.Modal, title="Create a new event"):
     target_date_input = discord.ui.TextInput(label="Target Date: (MM/DD/YY)", required=False, placeholder="Optional: Default is today")
 
     async def on_submit(self, interaction: discord.Interaction):
+        guild_id = interaction.guild_id
+        event_name = self.event_name_input.value.strip()
+
+        # Check if event name already exists
+        existing_events = events.get_events(guild_id, event_name)
+        if existing_events and event_name.lower() in [e.lower() for e in existing_events.keys()]:
+            await interaction.response.send_message(
+                f"❌ An event named `{event_name}` already exists. Please choose a different name.",
+                ephemeral=True
+            )
+            return
+
+        # Check event limit (free tier = 2 events)
+        all_events = events.get_events(guild_id)
+        current_count = len(all_events)
+
+        try:
+            entitlements.check_event_limit(guild_id, current_count)
+        except EventLimitReachedError as e:
+            await interaction.response.send_message(e.user_message, ephemeral=True)
+            return
+
+        # Validate target date
         slots = GenerateProposedDates(self.target_date_input.value)
         if slots is None:
             await interaction.response.send_message(
@@ -230,8 +257,8 @@ class NewEventModal(discord.ui.Modal, title="Create a new event"):
             return
 
         event_data = events.EventState(
-            guild_id=str(interaction.guild_id),
-            event_name=self.event_name_input.value,
+            guild_id=str(guild_id),
+            event_name=event_name,
             max_attendees=self.max_attendees_input.value,
             organizer=interaction.user.id,
             organizer_cname=interaction.user.name,
@@ -241,8 +268,10 @@ class NewEventModal(discord.ui.Modal, title="Create a new event"):
             rsvp=[]
         )
 
+        log_event_action("create_started", guild_id, event_name, user_id=interaction.user.id)
+
         await interaction.response.send_message(
-            f"📅 Creating event: **{self.event_name_input.value}**\n{interaction.user.mention}\n🕐 Suggested Dates:",
+            f"📅 Creating event: **{event_name}**\n{interaction.user.mention}\n🕐 Suggested Dates:",
             view=ProposedDateSelectionView(interaction, event_data),
             ephemeral=True
         )

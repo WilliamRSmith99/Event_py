@@ -1,7 +1,10 @@
 from core.storage import read_json, write_json_atomic
+from core.logging import get_logger, log_event_action
 from dataclasses import dataclass, field
 from typing import Set, Dict, Any, Optional, Union, Tuple
 import uuid
+
+logger = get_logger(__name__)
 
 # ========== Event State Model ==========
 
@@ -140,9 +143,10 @@ def delete_event(guild_id: str, event_name: str) -> bool:
     try:
         del events_list[str(guild_id)]["events"][event_name]
         save_events(events_list)
+        log_event_action("delete", guild_id, event_name)
         return True
     except KeyError as e:
-        print(f"[delete_event] Event not found: {e}")
+        logger.warning(f"Event not found for deletion: {event_name} in guild {guild_id}")
         return False
 
 def remove_user_from_queue(queue: dict, user_id: str) -> dict:
