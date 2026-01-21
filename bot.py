@@ -6,8 +6,8 @@ import sys
 import config
 from commands.configs import settings
 from commands.event import manage, register, responses, create, list
-from commands.user import timezone
-from core import auth, utils, events, userdata, bulletins, logging as bot_logging
+from commands.user import timezone, notifications as notif_commands
+from core import auth, utils, events, userdata, bulletins, notifications, logging as bot_logging
 
 # =============================================================================
 # Validate Configuration
@@ -141,11 +141,11 @@ async def viewtimezone(interaction: discord.Interaction):
             ephemeral=True
         )
 
-@tree.command(name="remindme", description="Schedule a DM reminder for your event", guild=guild)
+@tree.command(name="remindme", description="Set up notifications for an event", guild=guild)
 @app_commands.describe(event_name="The name of the event you want to be reminded for.")
 async def remindme(interaction: discord.Interaction, event_name: str):
-    """Command to set a DM reminder for an event."""
-    await responses.build_overlap_summary(interaction, event_name, interaction.guild_id)
+    """Command to configure notification preferences for an event."""
+    await notif_commands.show_notification_settings(interaction, event_name)
 
 # ============================================================
 #                        BOT EVENTS
@@ -164,6 +164,10 @@ async def on_ready():
         logger.info("Slash commands synced globally (may take up to 1 hour to propagate)")
 
     await bulletins.restore_bulletin_views(client)
+
+    # Start notification scheduler
+    notifications.init_scheduler(client)
+
     logger.info("Bot is ready!")
 
 

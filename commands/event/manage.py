@@ -1,13 +1,13 @@
 import discord
-from core import auth, events
+from core import auth, events, notifications
+from core.logging import get_logger
 from commands.event import list
+
+logger = get_logger(__name__)
 
 # ==========================
 #     Delete Event
 # ==========================
-
-from commands.event import manage
-import discord
 class DeleteEventConfirmView(discord.ui.View):
     def __init__(self, guild_id: int, event_name: str, event_details: events.EventState):
         super().__init__(timeout=180)
@@ -59,10 +59,23 @@ async def _prompt_event_deletion(interaction, guild_id, event_name, event_detail
 
     async def handle_yes(inter: discord.Interaction):
         if not await auth.authenticate(inter.user, event_details.organizer):
-            await inter.response.send_message("❌ You don’t have permission to delete this event.", ephemeral=True)
+            await inter.response.send_message("❌ You don't have permission to delete this event.", ephemeral=True)
             return
 
         result = events.delete_event(guild_id, event_name)
+
+        if result:
+            # Send cancellation notifications to users who signed up
+            try:
+                await notifications.notify_event_canceled(
+                    inter.client,
+                    guild_id,
+                    event_name,
+                    reason="The organizer has canceled this event."
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send cancellation notifications: {e}")
+
         message = (
             f"🪄 Poof! **{event_details.event_name}** successfully deleted"
             if result else

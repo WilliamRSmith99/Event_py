@@ -19,6 +19,11 @@ class ServerConfigState:
     bulletin_settings_enabled: bool = False
     display_settings_enabled: bool = True
 
+    # Notification settings
+    notifications_enabled: bool = True
+    default_reminder_minutes: int = 60  # 1 hour before
+    notification_channel: Optional[str] = None  # Channel for server-wide announcements
+
     def __post_init__(self):
         self.admin_roles = self.admin_roles or []
         self.event_organizer_roles = self.event_organizer_roles or []
@@ -30,6 +35,8 @@ class ServerConfigState:
             self.bulletin_settings_enabled = False
         if self.display_settings_enabled is None:
             self.display_settings_enabled = True
+        if self.notifications_enabled is None:
+            self.notifications_enabled = True
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -40,7 +47,10 @@ class ServerConfigState:
             "bulletin_channel": self.bulletin_channel,
             "roles_and_permissions_settings_enabled": self.roles_and_permissions_settings_enabled,
             "bulletin_settings_enabled": self.bulletin_settings_enabled,
-            "display_settings_enabled": self.display_settings_enabled
+            "display_settings_enabled": self.display_settings_enabled,
+            "notifications_enabled": self.notifications_enabled,
+            "default_reminder_minutes": self.default_reminder_minutes,
+            "notification_channel": self.notification_channel,
         }
 
     @staticmethod
@@ -53,7 +63,10 @@ class ServerConfigState:
             bulletin_channel=data.get("bulletin_channel", None),
             roles_and_permissions_settings_enabled=data.get("roles_and_permissions_settings_enabled", True),
             bulletin_settings_enabled=data.get("bulletin_settings_enabled", False),
-            display_settings_enabled=data.get("display_settings_enabled", True)
+            display_settings_enabled=data.get("display_settings_enabled", True),
+            notifications_enabled=data.get("notifications_enabled", True),
+            default_reminder_minutes=data.get("default_reminder_minutes", 60),
+            notification_channel=data.get("notification_channel", None),
         )
 
 

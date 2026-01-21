@@ -373,11 +373,8 @@ class NotifyMeButton(Button):
         super().__init__(label=button_label, style=button_style, custom_id=custom_id)
 
     async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_message(
-        content=f"⚠️ **OOPS!**\nIt appears this feature is still under construction.",
-        view=None,
-        ephemeral=True
-        )
+        from commands.user import notifications as notif_commands
+        await notif_commands.quick_enable_notifications(interaction, self.event_name)
 
 class RegisterSlotButton(Button):
     def __init__(self, event_name, slot_time: str, emoji_index: str):
