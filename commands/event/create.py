@@ -95,6 +95,30 @@ class SubmitDateButton(discord.ui.Button):
         if self.view:
             self.view.stop()
 
+class SelectAllTimesButton(discord.ui.Button):
+    def __init__(self, event_data, parent_view, date):
+        super().__init__(label="Select All", style=discord.ButtonStyle.secondary)
+        self.event_data = event_data
+        self.parent_view = parent_view
+        self.date = date
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.event_data.organizer:
+            await interaction.response.send_message("You're not authorized to modify this.", ephemeral=True)
+            return
+
+        # Toggle: if all selected, deselect all; otherwise select all
+        all_times = {f"{slot % 12 or 12} {'AM' if slot < 12 else 'PM'}" for slot in range(24)}
+
+        if self.parent_view.selected_slots == all_times:
+            self.parent_view.selected_slots.clear()
+        else:
+            self.parent_view.selected_slots = all_times.copy()
+
+        self.parent_view.update_buttons()
+        await interaction.response.edit_message(view=self.parent_view)
+
+
 class SubmitTimeButton(discord.ui.Button):
     def __init__(self, event_data, parent_view, date):
         super().__init__(label="Submit Times", style=discord.ButtonStyle.primary)
@@ -208,10 +232,11 @@ class ProposedTimeSelectionView(discord.ui.View):
     def update_buttons(self):
         self.clear_items()
         for slot in range(24):
-            time_label = f"{slot % 12 or 12}{'AM' if slot < 12 else 'PM'}"
+            time_label = f"{slot % 12 or 12} {'AM' if slot < 12 else 'PM'}"
             style = discord.ButtonStyle.success if time_label in self.selected_slots else discord.ButtonStyle.secondary
             self.add_item(DateButton(time_label, self.event_data, self, style=style))
 
+        self.add_item(SelectAllTimesButton(self.event_data, self, self.date))
         self.add_item(SubmitTimeButton(self.event_data, self, self.date))
 
     async def on_timeout(self):

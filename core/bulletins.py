@@ -419,3 +419,101 @@ class ThreadView(View):
 
         for emoji, slot in slots:
             self.add_item(RegisterSlotButton(event_name, slot, emoji))
+
+
+# ========== Past Event Bulletin Updates ==========
+
+async def mark_bulletin_as_past(client: discord.Client, event_data: events.EventState) -> bool:
+    """
+    Update a bulletin to show the event has ended.
+
+    Removes interactive buttons and updates the message to indicate
+    the event is now in the past.
+
+    Args:
+        client: Discord client
+        event_data: The event that has ended
+
+    Returns:
+        True if updated successfully
+    """
+    if not event_data.bulletin_channel_id or not event_data.bulletin_message_id:
+        return False
+
+    try:
+        channel = client.get_channel(int(event_data.bulletin_channel_id))
+        if not channel:
+            logger.warning(f"Bulletin channel not found: {event_data.bulletin_channel_id}")
+            return False
+
+        head_msg = await channel.fetch_message(int(event_data.bulletin_message_id))
+
+        # Format confirmed date nicely
+        confirmed_display = "TBD"
+        if event_data.confirmed_date and event_data.confirmed_date != "TBD":
+            try:
+                confirmed_dt = datetime.fromisoformat(event_data.confirmed_date)
+                confirmed_display = f"<t:{int(confirmed_dt.timestamp())}:F>"
+            except ValueError:
+                confirmed_display = event_data.confirmed_date
+
+        # Create "event ended" bulletin body
+        bulletin_body = (
+            f"📅 **Event:** `{event_data.event_name}`\n"
+            f"🙋 **Organizer:** <@{event_data.organizer}>\n"
+            f"✅ **Date:** {confirmed_display}\n\n"
+            f"✨ **This event has ended.**\n\n"
+            f"*Thank you to everyone who participated!*"
+        )
+
+        # Remove view (disables buttons)
+        await head_msg.edit(content=bulletin_body, view=None)
+
+        # Also update thread messages to remove buttons
+        bulletin_entry = get_event_bulletin(event_data.guild_id).get(str(event_data.bulletin_message_id))
+        if bulletin_entry and bulletin_entry.thread_id:
+            thread = client.get_channel(int(bulletin_entry.thread_id))
+            if thread:
+                for msg_id in bulletin_entry.thread_messages:
+                    try:
+                        thread_msg = await thread.fetch_message(int(msg_id))
+                        # Keep embed but remove buttons
+                        await thread_msg.edit(view=None)
+                    except discord.NotFound:
+                        pass
+                    except Exception as e:
+                        logger.warning(f"Failed to update thread message {msg_id}: {e}")
+
+        logger.info(f"Marked bulletin for '{event_data.event_name}' as past")
+        return True
+
+    except discord.NotFound:
+        logger.warning(f"Bulletin message not found: {event_data.bulletin_message_id}")
+        return False
+    except Exception as e:
+        logger.error(f"Failed to mark bulletin as past: {e}")
+        return False
+
+
+async def update_past_event_bulletins(client: discord.Client, guild_id: int) -> int:
+    """
+    Update all bulletins for past events in a guild.
+
+    Args:
+        client: Discord client
+        guild_id: Guild ID
+
+    Returns:
+        Number of bulletins updated
+    """
+    past_events = events.get_past_events(guild_id)
+    updated_count = 0
+
+    for event in past_events:
+        if await mark_bulletin_as_past(client, event):
+            updated_count += 1
+
+    if updated_count > 0:
+        logger.info(f"Updated {updated_count} past event bulletins for guild {guild_id}")
+
+    return updated_count

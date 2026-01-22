@@ -438,10 +438,22 @@ class NotificationScheduler:
     async def _check_and_send_notifications(self) -> None:
         """Check for pending notifications and send them."""
         # Import here to avoid circular imports
-        from core import events
+        from core import events, bulletins
 
         now = datetime.utcnow()
         all_events = {}
+
+        # Archive past events and update their bulletins (runs every check)
+        events_data = events.load_events()
+        for guild_id_str in events_data.keys():
+            guild_id = int(guild_id_str)
+            past_events = events.get_past_events(guild_id)
+
+            for event in past_events:
+                # Update bulletin to show event ended
+                await bulletins.mark_bulletin_as_past(self.client, event)
+                # Archive the event
+                events.archive_event(guild_id_str, event.event_name)
 
         # Load all events from all guilds
         events_data = events.load_events()

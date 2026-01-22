@@ -1,11 +1,10 @@
 """
-Entitlements and subscription management for Event Bot.
+Entitlements and subscription management for Overlap.
 
 Handles premium tier checks and feature limits.
 This module provides the foundation for the freemium model.
 
-Current implementation uses in-memory checks.
-Phase 4 will migrate this to SQLite for persistence.
+Uses SQLite for persistence via SubscriptionRepository.
 """
 from enum import Enum
 from typing import Optional, Dict, Any
@@ -17,6 +16,18 @@ from core.logging import get_logger
 from core.exceptions import EventLimitReachedError, PremiumRequiredError
 
 logger = get_logger(__name__)
+
+# Lazy import to avoid circular dependency
+_repo = None
+
+
+def _get_repo():
+    """Get the subscription repository (lazy load to avoid circular imports)."""
+    global _repo
+    if _repo is None:
+        from core.repositories.subscriptions import SubscriptionRepository
+        _repo = SubscriptionRepository
+    return _repo
 
 
 # =============================================================================
@@ -86,31 +97,21 @@ FEATURE_LIMITS: Dict[SubscriptionTier, Dict[Feature, Any]] = {
 
 
 # =============================================================================
-# In-Memory Subscription Store (temporary until SQLite migration)
+# Public API
 # =============================================================================
-
-# Guild ID -> SubscriptionInfo
-_subscriptions: Dict[int, SubscriptionInfo] = {}
-
 
 def _get_subscription(guild_id: int) -> SubscriptionInfo:
     """
-    Get subscription info for a guild.
+    Get subscription info for a guild from the database.
 
-    Currently returns FREE tier for all guilds.
-    Will be replaced with database lookup in Phase 4.
+    Args:
+        guild_id: The Discord guild ID
+
+    Returns:
+        SubscriptionInfo for the guild (FREE tier if not found)
     """
-    if guild_id not in _subscriptions:
-        _subscriptions[guild_id] = SubscriptionInfo(
-            guild_id=guild_id,
-            tier=SubscriptionTier.FREE
-        )
-    return _subscriptions[guild_id]
+    return _get_repo().get_subscription(guild_id)
 
-
-# =============================================================================
-# Public API
-# =============================================================================
 
 def is_premium(guild_id: int) -> bool:
     """
@@ -246,7 +247,7 @@ def require_feature(guild_id: int, feature: Feature) -> None:
 
 
 # =============================================================================
-# Subscription Management (stubs for Phase 5)
+# Subscription Management
 # =============================================================================
 
 def activate_premium(
@@ -254,41 +255,62 @@ def activate_premium(
     expires_at: datetime,
     stripe_customer_id: Optional[str] = None,
     stripe_subscription_id: Optional[str] = None
-) -> None:
+) -> bool:
     """
     Activate premium for a guild.
 
-    This will be called by the Stripe webhook handler in Phase 5.
+    Called by the Stripe webhook handler when a subscription is created.
 
     Args:
         guild_id: The Discord guild ID
         expires_at: When the subscription expires
         stripe_customer_id: Stripe customer ID
         stripe_subscription_id: Stripe subscription ID
+
+    Returns:
+        True if activated successfully
     """
-    _subscriptions[guild_id] = SubscriptionInfo(
+    success = _get_repo().activate_premium(
         guild_id=guild_id,
-        tier=SubscriptionTier.PREMIUM,
         expires_at=expires_at,
         stripe_customer_id=stripe_customer_id,
         stripe_subscription_id=stripe_subscription_id
     )
-    logger.info(f"Premium activated for guild {guild_id} until {expires_at}")
+    if success:
+        logger.info(f"Premium activated for guild {guild_id} until {expires_at}")
+    return success
 
 
-def deactivate_premium(guild_id: int) -> None:
+def deactivate_premium(guild_id: int) -> bool:
     """
     Deactivate premium for a guild (e.g., subscription canceled or expired).
 
     Args:
         guild_id: The Discord guild ID
+
+    Returns:
+        True if deactivated successfully
     """
-    if guild_id in _subscriptions:
-        _subscriptions[guild_id] = SubscriptionInfo(
-            guild_id=guild_id,
-            tier=SubscriptionTier.FREE
-        )
-    logger.info(f"Premium deactivated for guild {guild_id}")
+    success = _get_repo().deactivate_premium(guild_id)
+    if success:
+        logger.info(f"Premium deactivated for guild {guild_id}")
+    return success
+
+
+def extend_subscription(guild_id: int, new_expires_at: datetime) -> bool:
+    """
+    Extend a subscription's expiration date.
+
+    Called by the Stripe webhook handler when a subscription is renewed.
+
+    Args:
+        guild_id: The Discord guild ID
+        new_expires_at: New expiration datetime
+
+    Returns:
+        True if extended successfully
+    """
+    return _get_repo().extend_subscription(guild_id, new_expires_at)
 
 
 def get_subscription_info(guild_id: int) -> SubscriptionInfo:
@@ -302,3 +324,29 @@ def get_subscription_info(guild_id: int) -> SubscriptionInfo:
         SubscriptionInfo with full details
     """
     return _get_subscription(guild_id)
+
+
+def get_subscription_by_stripe_customer(customer_id: str) -> Optional[SubscriptionInfo]:
+    """
+    Get subscription by Stripe customer ID.
+
+    Args:
+        customer_id: Stripe customer ID
+
+    Returns:
+        SubscriptionInfo or None
+    """
+    return _get_repo().get_by_stripe_customer(customer_id)
+
+
+def get_subscription_by_stripe_subscription(subscription_id: str) -> Optional[SubscriptionInfo]:
+    """
+    Get subscription by Stripe subscription ID.
+
+    Args:
+        subscription_id: Stripe subscription ID
+
+    Returns:
+        SubscriptionInfo or None
+    """
+    return _get_repo().get_by_stripe_subscription(subscription_id)

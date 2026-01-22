@@ -1,7 +1,8 @@
 from core.storage import read_json, write_json_atomic
 from core.logging import get_logger, log_event_action
 from dataclasses import dataclass, field
-from typing import Set, Dict, Any, Optional, Union, Tuple
+from datetime import datetime
+from typing import Set, Dict, Any, Optional, Union, Tuple, List
 from enum import Enum
 import uuid
 
@@ -72,6 +73,10 @@ class EventState:
     # Premium features
     recurrence: Optional[RecurrenceConfig] = None  # Recurring event config (Premium)
 
+    # Archiving
+    archived_at: Optional[str] = None  # ISO format when event was archived
+    created_at: Optional[str] = field(default_factory=lambda: datetime.utcnow().isoformat())
+
     def to_dict(self) -> Dict[str, Any]:
         result = {
             "guild_id": self.guild_id,
@@ -89,6 +94,8 @@ class EventState:
             "availability": self.availability,
             "waitlist": self.waitlist,
             "availability_to_message_map": self.availability_to_message_map,
+            "archived_at": self.archived_at,
+            "created_at": self.created_at,
         }
         # Only include recurrence if set
         if self.recurrence:
@@ -118,7 +125,25 @@ class EventState:
             waitlist=data.get("waitlist", {}),
             availability_to_message_map=data.get("availability_to_message_map", {}),
             recurrence=recurrence,
+            archived_at=data.get("archived_at"),
+            created_at=data.get("created_at"),
         )
+
+    @property
+    def is_archived(self) -> bool:
+        """Check if this event has been archived."""
+        return self.archived_at is not None
+
+    @property
+    def is_past(self) -> bool:
+        """Check if this event's confirmed date has passed."""
+        if not self.confirmed_date or self.confirmed_date == "TBD":
+            return False
+        try:
+            event_time = datetime.fromisoformat(self.confirmed_date)
+            return datetime.utcnow() > event_time
+        except ValueError:
+            return False
 
     @property
     def is_recurring(self) -> bool:
@@ -218,3 +243,188 @@ def user_has_any_availability(user_id: str, availability: dict) -> bool:
         if user_id in queue.values():
             return True
     return False
+
+
+# ========== Archiving Functions ==========
+
+def archive_event(guild_id: str, event_name: str) -> bool:
+    """
+    Archive an event (mark it as past/completed).
+
+    Archived events are kept for history but excluded from active event lists.
+
+    Args:
+        guild_id: The Discord guild ID
+        event_name: The event name
+
+    Returns:
+        True if archived successfully
+    """
+    event = get_event(int(guild_id), event_name)
+    if not event:
+        return False
+
+    event.archived_at = datetime.utcnow().isoformat()
+    modify_event(event)
+    log_event_action("archive", guild_id, event_name)
+    return True
+
+
+def get_active_events(guild_id: int, name: Optional[str] = None) -> Dict[str, EventState]:
+    """
+    Get only active (non-archived, non-past) events for a guild.
+
+    This filters out:
+    - Events that have been explicitly archived
+    - Events whose confirmed date has passed
+
+    Args:
+        guild_id: The Discord guild ID
+        name: Optional event name filter
+
+    Returns:
+        Dict of active events
+    """
+    all_events = get_events(guild_id, name)
+    return {
+        event_name: event
+        for event_name, event in all_events.items()
+        if not event.is_archived and not event.is_past
+    }
+
+
+def get_archived_events(guild_id: int) -> Dict[str, EventState]:
+    """
+    Get archived events for a guild (event history).
+
+    Returns events that have been archived or whose confirmed date has passed.
+
+    Args:
+        guild_id: The Discord guild ID
+
+    Returns:
+        Dict of archived events
+    """
+    all_events = get_events(guild_id)
+    return {
+        event_name: event
+        for event_name, event in all_events.items()
+        if event.is_archived or event.is_past
+    }
+
+
+def get_past_events(guild_id: int) -> List[EventState]:
+    """
+    Get events that have passed but not yet been archived.
+
+    Useful for batch archiving and bulletin updates.
+
+    Args:
+        guild_id: The Discord guild ID
+
+    Returns:
+        List of past events
+    """
+    all_events = get_events(guild_id)
+    return [
+        event for event in all_events.values()
+        if event.is_past and not event.is_archived
+    ]
+
+
+def archive_past_events(guild_id: int) -> int:
+    """
+    Archive all past events for a guild.
+
+    Args:
+        guild_id: The Discord guild ID
+
+    Returns:
+        Number of events archived
+    """
+    past_events = get_past_events(guild_id)
+    archived_count = 0
+
+    for event in past_events:
+        if archive_event(str(guild_id), event.event_name):
+            archived_count += 1
+
+    if archived_count > 0:
+        logger.info(f"Archived {archived_count} past events for guild {guild_id}")
+
+    return archived_count
+
+
+def get_event_history(guild_id: int, event_name: Optional[str] = None) -> List[EventState]:
+    """
+    Get event history for a guild (archived events).
+
+    For recurring events, this shows all past occurrences.
+
+    Args:
+        guild_id: The Discord guild ID
+        event_name: Optional filter by event name (for recurring event history)
+
+    Returns:
+        List of archived events, sorted by date (newest first)
+    """
+    archived = get_archived_events(guild_id)
+
+    if event_name:
+        # Filter by event name (exact or partial for recurring event series)
+        name_lower = event_name.lower()
+        archived = {
+            k: v for k, v in archived.items()
+            if name_lower in k.lower() or k.lower().startswith(name_lower)
+        }
+
+    # Sort by confirmed_date or archived_at, newest first
+    def sort_key(event: EventState):
+        if event.confirmed_date and event.confirmed_date != "TBD":
+            try:
+                return datetime.fromisoformat(event.confirmed_date)
+            except ValueError:
+                pass
+        if event.archived_at:
+            try:
+                return datetime.fromisoformat(event.archived_at)
+            except ValueError:
+                pass
+        return datetime.min
+
+    return sorted(archived.values(), key=sort_key, reverse=True)
+
+
+def get_recurring_event_history(guild_id: int, parent_event_id: str) -> List[EventState]:
+    """
+    Get all past occurrences of a recurring event.
+
+    Args:
+        guild_id: The Discord guild ID
+        parent_event_id: The parent event ID for the recurring series
+
+    Returns:
+        List of past occurrences, sorted by date (newest first)
+    """
+    all_events = get_events(guild_id)
+    archived = get_archived_events(guild_id)
+
+    # Combine and filter by parent_event_id
+    all_occurrences = []
+
+    for event in list(all_events.values()) + list(archived.values()):
+        if event.recurrence and event.recurrence.parent_event_id == parent_event_id:
+            all_occurrences.append(event)
+        elif event.event_id == parent_event_id:
+            all_occurrences.append(event)
+
+    # Sort by confirmed_date, newest first
+    def sort_key(event: EventState):
+        if event.confirmed_date and event.confirmed_date != "TBD":
+            try:
+                return datetime.fromisoformat(event.confirmed_date)
+            except ValueError:
+                pass
+        return datetime.min
+
+    return sorted(all_occurrences, key=sort_key, reverse=True)
