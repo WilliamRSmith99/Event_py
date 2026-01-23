@@ -141,7 +141,13 @@ class EventState:
             return False
         try:
             event_time = datetime.fromisoformat(self.confirmed_date)
-            return datetime.utcnow() > event_time
+            # Handle timezone-aware datetimes by making utcnow() aware
+            if event_time.tzinfo is not None:
+                from datetime import timezone
+                now = datetime.now(timezone.utc)
+            else:
+                now = datetime.utcnow()
+            return now > event_time
         except ValueError:
             return False
 
