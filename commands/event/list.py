@@ -418,6 +418,14 @@ class ConfirmDateView(utils.ExpiringView):
         self.event.confirmed_date = self.selected_slot
         events.modify_event(self.event)
 
+        # Update the bulletin if one exists
+        try:
+            from core import bulletins
+            await bulletins.update_bulletin_header(interaction.client, self.event)
+        except Exception as e:
+            # Don't fail the confirmation if bulletin update fails
+            pass
+
         # Send confirmation notifications to users who have notification preferences
         try:
             confirmed_time = datetime.fromisoformat(self.selected_slot)

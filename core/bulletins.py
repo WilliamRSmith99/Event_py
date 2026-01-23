@@ -323,21 +323,88 @@ async def generate_new_bulletin(interaction: discord.Interaction, event_data, se
         )
 
 async def update_bulletin_header(client: discord.Client, event_data: events.EventState):
-    bulletin = client.get_channel(int(event_data.bulletin_channel_id))
-    head_msg = await bulletin.fetch_message(int(event_data.bulletin_message_id))
+    """Update the bulletin header message with current event data."""
+    if not event_data.bulletin_channel_id or not event_data.bulletin_message_id:
+        return False
 
-    proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_timestamp(event_data.availability))
+    try:
+        channel = client.get_channel(int(event_data.bulletin_channel_id))
+        if not channel:
+            logger.warning(f"Bulletin channel not found: {event_data.bulletin_channel_id}")
+            return False
 
-    bulletin_body = (
-        f"📅 **Event:** `{event_data.event_name}`\n"
-        f"🙋 **Organizer:** <@{event_data.organizer}>\n"
-        f"✅ **Confirmed Date:** *{event_data.confirmed_date or 'TBD'}*\n"
-        f"🗓️ **Proposed Dates:**\n{proposed_dates or '*None yet*'}\n\n\n"
-        "      ⬇️ \"Register\" or select times manually in the thread below!\n"
-    )
-    bulletin_view=BulletinView(event_data.event_name)
+        head_msg = await channel.fetch_message(int(event_data.bulletin_message_id))
 
-    await head_msg.edit(content=bulletin_body,view=bulletin_view)
+        proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_timestamp(event_data.availability))
+
+        # Format confirmed date nicely using Discord timestamp
+        confirmed_display = "TBD"
+        if event_data.confirmed_date and event_data.confirmed_date != "TBD":
+            try:
+                confirmed_dt = datetime.fromisoformat(event_data.confirmed_date)
+                confirmed_display = f"<t:{int(confirmed_dt.timestamp())}:F>"
+            except ValueError:
+                confirmed_display = event_data.confirmed_date
+
+        bulletin_body = (
+            f"📅 **Event:** `{event_data.event_name}`\n"
+            f"🙋 **Organizer:** <@{event_data.organizer}>\n"
+            f"✅ **Confirmed Date:** {confirmed_display}\n"
+            f"🗓️ **Proposed Dates:**\n{proposed_dates or '*None yet*'}\n\n\n"
+            "      ⬇️ \"Register\" or select times manually in the thread below!\n"
+        )
+        bulletin_view = BulletinView(event_data.event_name)
+
+        await head_msg.edit(content=bulletin_body, view=bulletin_view)
+        logger.info(f"Updated bulletin header for '{event_data.event_name}'")
+        return True
+
+    except discord.NotFound:
+        logger.warning(f"Bulletin message not found: {event_data.bulletin_message_id}")
+        return False
+    except Exception as e:
+        logger.error(f"Failed to update bulletin header: {e}")
+        return False
+
+
+async def delete_bulletin_message(client: discord.Client, event_data: events.EventState) -> bool:
+    """
+    Delete the bulletin message and thread for an event.
+
+    Args:
+        client: Discord client
+        event_data: The event whose bulletin should be deleted
+
+    Returns:
+        True if deleted successfully
+    """
+    if not event_data.bulletin_channel_id or not event_data.bulletin_message_id:
+        return False
+
+    try:
+        channel = client.get_channel(int(event_data.bulletin_channel_id))
+        if not channel:
+            logger.warning(f"Bulletin channel not found: {event_data.bulletin_channel_id}")
+            return False
+
+        head_msg = await channel.fetch_message(int(event_data.bulletin_message_id))
+
+        # Delete the message (this also deletes the thread)
+        await head_msg.delete()
+
+        # Clean up the bulletin entry from storage
+        delete_event_bulletin(event_data.guild_id, event_data.bulletin_message_id)
+
+        logger.info(f"Deleted bulletin for '{event_data.event_name}'")
+        return True
+
+    except discord.NotFound:
+        # Message already deleted, just clean up storage
+        delete_event_bulletin(event_data.guild_id, event_data.bulletin_message_id)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to delete bulletin: {e}")
+        return False
     
 
 async def handle_slot_selection(interaction: discord.Interaction, selected_slot: str, event_name: str):

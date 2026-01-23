@@ -62,6 +62,13 @@ async def _prompt_event_deletion(interaction, guild_id, event_name, event_detail
             await inter.response.send_message("❌ You don't have permission to delete this event.", ephemeral=True)
             return
 
+        # Delete the bulletin message first (before deleting event data)
+        try:
+            from core import bulletins
+            await bulletins.delete_bulletin_message(inter.client, event_details)
+        except Exception as e:
+            logger.warning(f"Failed to delete bulletin: {e}")
+
         result = events.delete_event(guild_id, event_name)
 
         if result:
