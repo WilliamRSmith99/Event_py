@@ -1,7 +1,7 @@
 import discord
 from core import auth, events, notifications
 from core.logging import get_logger
-from commands.event import list
+from commands.event import list as event_list
 
 logger = get_logger(__name__)
 
@@ -25,6 +25,7 @@ class DeleteEventConfirmView(discord.ui.View):
         )
 
 async def delete_event(interaction: discord.Interaction, guild_id: int, event_name: str) -> bool:
+    from core import userdata
     events_found = events.get_events(guild_id, event_name)
 
     if len(events_found) == 0:
@@ -33,21 +34,23 @@ async def delete_event(interaction: discord.Interaction, guild_id: int, event_na
 
     elif len(events_found) > 1:
         await interaction.response.send_message(
-            f"😬 Oh no! An exact match couldn't be located for `{event_name}`.\n"
+            f"😬 Unable to match a single event for `{event_name}`.\n"
             "Did you mean one of these?",
             ephemeral=True
         )
 
+        # Get user timezone for proper display
+        user_tz = userdata.get_user_timezone(interaction.user.id) or "UTC"
         for matched_name, event in events_found.items():
-            view = list.ManageEventView(event, interaction.guild.id, interaction.user)
-            await list.format_single_event(interaction, event, is_edit=False,inherit_view=view)
+            view = event_list.ManageEventView(event, user_tz, interaction.guild.id, interaction.user)
+            await event_list.format_single_event(interaction, event, is_edit=False, inherit_view=view)
 
         return False
 
     else:
-            event_name_exact, event_details = list(events_found.items())[0]
-            await _prompt_event_deletion(interaction, guild_id, event_name_exact, event_details)
-            return True
+        event_name_exact, event_details = next(iter(events_found.items()))
+        await _prompt_event_deletion(interaction, guild_id, event_name_exact, event_details)
+        return True
 
 async def _prompt_event_deletion(interaction, guild_id, event_name, event_details, return_on_cancel=None):
     if not await auth.authenticate(interaction.user, event_details.organizer):

@@ -215,7 +215,7 @@ class SubmitTimeButton(discord.ui.Button):
                 logger.warning(f"Failed to parse datetime: {datetime_str}", exc_info=e)
 
         events.modify_event(self.event_data)
-        
+
         remaining_dates = list(self.event_data.slots)
         current_index = remaining_dates.index(self.date)
 
@@ -226,15 +226,32 @@ class SubmitTimeButton(discord.ui.Button):
                 view=ProposedTimeSelectionView(interaction, self.event_data, next_date)
             )
         else:
+            # Auto-confirm if only a single time slot was proposed
+            if len(self.event_data.availability) == 1:
+                single_slot = list(self.event_data.availability.keys())[0]
+                self.event_data.confirmed_date = single_slot
+                events.modify_event(self.event_data)
+                logger.info(f"Auto-confirmed single slot event '{self.event_data.event_name}' for {single_slot}")
+
             ## Create Public event bulletin, if configured
             server_config = conf.get_config(self.event_data.guild_id)
             if getattr(server_config, "bulletin_settings_enabled", False) and getattr(server_config, "bulletin_channel", False):
-                await bulletins.generate_new_bulletin(interaction, event_data=self.event_data,server_config=server_config)
+                await bulletins.generate_new_bulletin(interaction, event_data=self.event_data, server_config=server_config)
             else:
-                await interaction.response.edit_message(
-                content=f"✅ **Finished setting up available times for {self.event_data.event_name}!**",
-                view=None
-            )
+                # Format the confirmed date if auto-confirmed
+                if self.event_data.confirmed_date and self.event_data.confirmed_date != "TBD":
+                    from datetime import datetime
+                    confirmed_dt = datetime.fromisoformat(self.event_data.confirmed_date)
+                    confirmed_display = f"<t:{int(confirmed_dt.timestamp())}:F>"
+                    await interaction.response.edit_message(
+                        content=f"✅ **Event created: {self.event_data.event_name}**\n📅 Confirmed for {confirmed_display}",
+                        view=None
+                    )
+                else:
+                    await interaction.response.edit_message(
+                        content=f"✅ **Finished setting up available times for {self.event_data.event_name}!**",
+                        view=None
+                    )
 
         if self.view:
             self.view.stop()

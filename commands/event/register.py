@@ -12,8 +12,19 @@ async def schedule_command(interaction: discord.Interaction, event_name: str, ep
     guild_id = interaction.guild_id
     matches = events.get_events(guild_id, event_name)
 
-    if not matches or len(matches) != 1:
+    if not matches:
         await interaction.response.send_message("❌ Event not found.", ephemeral=True)
+        return
+
+    if len(matches) > 1:
+        # Multiple matches - show them all in upcoming_events format
+        from commands.event import list as event_list
+        await interaction.response.send_message(
+            f"😬 Unable to match a single event for `{event_name}`.\nDid you mean one of these?",
+            ephemeral=True
+        )
+        for event in matches.values():
+            await event_list.format_single_event(interaction, event, is_edit=False)
         return
 
     event = list(matches.values())[0]
@@ -41,6 +52,11 @@ async def schedule_command(interaction: discord.Interaction, event_name: str, ep
                 view=timezone.RegionSelectView(interaction.user.id)
             )
             return
+
+    # Check if event has a confirmed date (single slot) - toggle registration directly
+    if event.confirmed_date and event.confirmed_date != "TBD":
+        await _toggle_single_slot_registration(interaction, event, eph_resp)
+        return
 
     local_slots_by_date = utils.from_utc_to_local(event.availability, user_tz_str)
 
@@ -70,7 +86,54 @@ async def schedule_command(interaction: discord.Interaction, event_name: str, ep
         else:
             await interaction.response.send_message(content=view.render_date_label(), view=view, ephemeral=True)
     except discord.HTTPException as e:
-        await interaction.followup.send(f"❌ Failed to display schedule view: {str(e)}", ephemeral=True)    
+        await interaction.followup.send(f"❌ Failed to display schedule view: {str(e)}", ephemeral=True)
+
+
+async def _toggle_single_slot_registration(interaction: discord.Interaction, event, eph_resp: bool = False):
+    """Toggle registration for a confirmed event with a single time slot."""
+    user_id = str(interaction.user.id)
+    confirmed_slot = event.confirmed_date
+
+    # Check if user is currently registered for this slot
+    slot_availability = event.availability.get(confirmed_slot, {})
+    is_registered = user_id in slot_availability.values()
+
+    if is_registered:
+        # Unregister user
+        updated_queue = events.remove_user_from_queue(slot_availability, user_id)
+        event.availability[confirmed_slot] = updated_queue
+        # Remove from RSVP if no longer has any availability
+        if not events.user_has_any_availability(user_id, event.availability) and user_id in event.rsvp:
+            event.rsvp.remove(user_id)
+        action_msg = f"❌ You have been **unregistered** from **{event.event_name}**."
+    else:
+        # Register user
+        next_position = str(len(slot_availability) + 1)
+        if confirmed_slot not in event.availability:
+            event.availability[confirmed_slot] = {}
+        event.availability[confirmed_slot][next_position] = user_id
+        # Add to RSVP if not already there
+        if user_id not in event.rsvp:
+            event.rsvp.append(user_id)
+        action_msg = f"✅ You have been **registered** for **{event.event_name}**!"
+
+    # Save changes
+    events.modify_event(event)
+    log_event_action("register", event.guild_id, event.event_name, user_id=int(user_id))
+
+    # Update bulletin if exists
+    try:
+        event_msg_directory = bulletins.get_event_bulletin(guild_id=event.guild_id)
+        if event.bulletin_message_id and event_msg_directory.get(f"{event.bulletin_message_id}"):
+            await bulletins.update_bulletin_header(interaction.client, event)
+    except Exception as e:
+        logger.warning(f"Failed to update bulletin: {e}")
+
+    # Send response
+    if eph_resp:
+        await interaction.response.send_message(action_msg, ephemeral=True)
+    else:
+        await utils.safe_send(interaction, action_msg)    
 
 class PaginatedHourSelectionView(View):
     def __init__(self, event, slots_data_by_date, user_id, use_24hr: bool = False):

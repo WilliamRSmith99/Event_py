@@ -20,7 +20,8 @@ async def build_overlap_summary(interaction: discord.Interaction, event_name: st
 
     event_matches = events.get_events(guild_id, event_name)
     if len(event_matches) == 0:
-        return None, "❌ Event not found."
+        await interaction.response.send_message("❌ Event not found.", ephemeral=True)
+        return
     elif len(event_matches) == 1:
         event = list(event_matches.values())[0]
         local_availability = utils.from_utc_to_local(event.availability, user_tz_str)
@@ -35,9 +36,8 @@ async def build_overlap_summary(interaction: discord.Interaction, event_name: st
     else:
         from commands.event.list import format_single_event
         await interaction.response.send_message(
-            f"😬 Oh no! An exact match couldn't be located for `{event_name}`.\n"
+            f"😬 Unable to match a single event for `{event_name}`.\n"
             "Did you mean one of these?", ephemeral=True)
-        await interaction.response.defer(ephemeral=True, thinking=True)
         for event in event_matches.values():
             await format_single_event(interaction, event, is_edit=False)
 

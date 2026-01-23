@@ -112,10 +112,15 @@ async def restore_bulletin_views(client: discord.Client):
     all_bulletins = load_event_bulletins()
     msg_count = 0
     for guild_id, bulletin_map in all_bulletins.items():
+        # Get server config to check if threads are enabled
+        server_config = conf.get_config(int(guild_id))
+        use_threads = getattr(server_config, "bulletin_use_threads", True) if server_config else True
+
         for head_msg_id, bulletin in bulletin_map.items():
             try:
-                # Restore the main bulletin view (Register + Notify Me buttons)
-                bulletin_view = BulletinView(bulletin.event)
+                # Restore the main bulletin view
+                # Show register button only when threads are disabled
+                bulletin_view = BulletinView(bulletin.event, show_register=not use_threads)
                 client.add_view(bulletin_view, message_id=int(head_msg_id))
                 msg_count += 1
 
@@ -251,14 +256,15 @@ async def generate_new_bulletin(interaction: discord.Interaction, event_data, se
 
     if use_threads:
         # Full bulletin with thread for time slot selection
+        # No register button when threads are enabled - users register in the thread
         bulletin_body = (
             f"📅 **Event:** `{event_data.event_name}`\n"
             f"🙋 **Organizer:** <@{event_data.organizer}>\n"
             f"✅ **Confirmed Date:** *{event_data.confirmed_date or 'TBD'}*\n"
             f"🗓️ **Proposed Dates:**\n{proposed_dates or '*None yet*'}\n\n\n"
-            "      ⬇️ \"Register\" below or select times manually in the thread below!"
+            "      ⬇️ Select times in the thread below!"
         )
-        bulletin_view = BulletinView(event_data.event_name)
+        bulletin_view = BulletinView(event_data.event_name, show_register=False)
         bulletin_msg = await channel.send(content=bulletin_body, view=bulletin_view)
         event_data.bulletin_message_id = str(bulletin_msg.id)
 
@@ -340,25 +346,50 @@ async def update_bulletin_header(client: discord.Client, event_data: events.Even
 
         head_msg = await channel.fetch_message(int(event_data.bulletin_message_id))
 
-        proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_timestamp(event_data.availability))
+        # Get server config to check if threads are enabled
+        server_config = conf.get_config(int(event_data.guild_id))
+        use_threads = getattr(server_config, "bulletin_use_threads", True) if server_config else True
 
         # Format confirmed date nicely using Discord timestamp
         confirmed_display = "TBD"
-        if event_data.confirmed_date and event_data.confirmed_date != "TBD":
+        is_confirmed = event_data.confirmed_date and event_data.confirmed_date != "TBD"
+        if is_confirmed:
             try:
                 confirmed_dt = datetime.fromisoformat(event_data.confirmed_date)
                 confirmed_display = f"<t:{int(confirmed_dt.timestamp())}:F>"
             except ValueError:
                 confirmed_display = event_data.confirmed_date
 
-        bulletin_body = (
-            f"📅 **Event:** `{event_data.event_name}`\n"
-            f"🙋 **Organizer:** <@{event_data.organizer}>\n"
-            f"✅ **Confirmed Date:** {confirmed_display}\n"
-            f"🗓️ **Proposed Dates:**\n{proposed_dates or '*None yet*'}\n\n\n"
-            "      ⬇️ \"Register\" or select times manually in the thread below!\n"
-        )
-        bulletin_view = BulletinView(event_data.event_name)
+        # Only show proposed dates if event is not yet confirmed
+        if is_confirmed:
+            bulletin_body = (
+                f"📅 **Event:** `{event_data.event_name}`\n"
+                f"🙋 **Organizer:** <@{event_data.organizer}>\n"
+                f"✅ **Confirmed Date:** {confirmed_display}\n\n"
+                "      ⬇️ Click \"Register\" to sign up!\n"
+            )
+            # When confirmed, always show register button (single slot to register for)
+            bulletin_view = BulletinView(event_data.event_name, show_register=True)
+        else:
+            proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_timestamp(event_data.availability))
+            if use_threads:
+                bulletin_body = (
+                    f"📅 **Event:** `{event_data.event_name}`\n"
+                    f"🙋 **Organizer:** <@{event_data.organizer}>\n"
+                    f"✅ **Confirmed Date:** *{confirmed_display}*\n"
+                    f"🗓️ **Proposed Dates:**\n{proposed_dates or '*None yet*'}\n\n\n"
+                    "      ⬇️ Select times in the thread below!\n"
+                )
+                bulletin_view = BulletinView(event_data.event_name, show_register=False)
+            else:
+                bulletin_body = (
+                    f"📅 **Event:** `{event_data.event_name}`\n"
+                    f"🙋 **Organizer:** <@{event_data.organizer}>\n"
+                    f"✅ **Confirmed Date:** *{confirmed_display}*\n"
+                    f"🗓️ **Proposed Dates:**\n{proposed_dates or '*None yet*'}\n\n\n"
+                    "      ⬇️ Click \"Register\" to sign up for time slots!\n"
+                )
+                bulletin_view = BulletinView(event_data.event_name, show_register=True)
 
         await head_msg.edit(content=bulletin_body, view=bulletin_view)
         logger.info(f"Updated bulletin header for '{event_data.event_name}'")
@@ -511,9 +542,12 @@ class RegisterSlotButton(Button):
         )
 
 class BulletinView(View):
-    def __init__(self, event_name):
-        super().__init__(timeout=None) #custom_id=f"{event_name}:thread:{slots[0][1]}"
-        self.add_item(RegisterButton(event_name))
+    def __init__(self, event_name, show_register: bool = True):
+        super().__init__(timeout=None)
+        # Only show Register button when threads are disabled (users need a way to register)
+        # When threads are enabled, users register in the thread via slot buttons
+        if show_register:
+            self.add_item(RegisterButton(event_name))
         self.add_item(NotifyMeButton(event_name))
 
 class ThreadView(View):

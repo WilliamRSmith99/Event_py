@@ -6,7 +6,7 @@ import asyncio
 
 import config
 from commands.configs import settings
-from commands.event import manage, register, responses, create, list
+from commands.event import manage, register, responses, create, list as event_list
 from commands.user import timezone, notifications as notif_commands
 from commands.admin import premium
 from core import auth, utils, events, userdata, bulletins, notifications, logging as bot_logging
@@ -58,30 +58,31 @@ async def new_event(interaction: discord.Interaction):
 @app_commands.describe(filter="Filter by event name or partial")
 async def event(interaction: discord.Interaction, filter: Optional[str] = None):
     """Command to view events, optionally filter by event name."""
-    await list.event_info(interaction, filter)
+    await event_list.event_info(interaction, filter)
 
 @tree.command(name="manage_event", description="Organizer and Admin ONLY: Manage an upcoming event", guild=guild)
 @app_commands.describe(action='one of "edit", "confirm", "delete"', event_name="The event name you want to manage.")
 async def manage_event(interaction: discord.Interaction, event_name: str, action: Literal["edit", "confirm", "delete"]):
     events_match = events.get_events(interaction.guild.id, event_name)
     if len(events_match) == 0:
-        await interaction.response.send_message(f"❌ Oh no! no events could be matched for `{event_name}`.\nPlease try again.", ephemeral=True)
+        await interaction.response.send_message(f"❌ Oh no! No events could be matched for `{event_name}`.\nPlease try again.", ephemeral=True)
         return False
 
     elif len(events_match) > 1:
         await interaction.response.send_message(
-            f"😬 Oh no! An exact match couldn't be located for `{event_name}`.\n"
+            f"😬 Unable to match a single event for `{event_name}`.\n"
             "Did you mean one of these?",
             ephemeral=True
         )
-        await interaction.response.defer(ephemeral=True)
+        # Get user timezone for proper display
+        user_tz = userdata.get_user_timezone(interaction.user.id) or "UTC"
         for matched_name, event in events_match.items():
-            view = list.ManageEventView(event, interaction.guild.id, interaction.user)
-            await list.format_single_event(interaction, event, is_edit=False, inherit_view=view)
+            view = event_list.ManageEventView(event, user_tz, interaction.guild.id, interaction.user)
+            await event_list.format_single_event(interaction, event, is_edit=False, inherit_view=view)
 
         return False
 
-    event_name_exact, event_details = list(events_match.items())[0]
+    event_name_exact, event_details = next(iter(events_match.items()))
     match action:
         case "edit":
             await interaction.response.send_message("Editing something...")

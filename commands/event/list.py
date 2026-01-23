@@ -84,13 +84,32 @@ async def format_single_event(interaction, event, is_edit=False, inherit_view=No
 
     badge_line = f"✨ {' • '.join(badges)}\n" if badges else ""
 
-    body = (
-        f"📅 **Event:** `{event.event_name}`\n"
-        f"{badge_line}"
-        f"🙋 **Organizer:** <@{event.organizer}>\n"
-        f"✅ **Confirmed Date:** *{event.confirmed_date or 'TBD'}*\n"
-        f"🗓️ **Proposed Dates (Your Timezone - `{user_tz}`):**\n{proposed_dates or '*None yet*'}\n"
-    )
+    # Format confirmed date as Discord timestamp if set
+    if event.confirmed_date and event.confirmed_date != "TBD":
+        try:
+            confirmed_dt = datetime.fromisoformat(event.confirmed_date)
+            confirmed_display = utils.to_discord_timestamp(confirmed_dt, 'F')
+        except ValueError:
+            confirmed_display = event.confirmed_date
+    else:
+        confirmed_display = "TBD"
+
+    # Only show proposed dates if event is not yet confirmed
+    if event.confirmed_date and event.confirmed_date != "TBD":
+        body = (
+            f"📅 **Event:** `{event.event_name}`\n"
+            f"{badge_line}"
+            f"🙋 **Organizer:** <@{event.organizer}>\n"
+            f"✅ **Confirmed Date:** {confirmed_display}\n"
+        )
+    else:
+        body = (
+            f"📅 **Event:** `{event.event_name}`\n"
+            f"{badge_line}"
+            f"🙋 **Organizer:** <@{event.organizer}>\n"
+            f"✅ **Confirmed Date:** *{confirmed_display}*\n"
+            f"🗓️ **Proposed Dates (Your Timezone - `{user_tz}`):**\n{proposed_dates or '*None yet*'}\n"
+        )
 
     if inherit_view:
         view = inherit_view
@@ -203,18 +222,41 @@ class EventView(utils.ExpiringView):
         self.add_item(InfoButton(event, user_tz))
 
 class ManageEventView(utils.ExpiringView):
-    def __init__(self, event, user_tz,guild_id: int, user):
+    def __init__(self, event, user_tz, guild_id: int, user):
         super().__init__(timeout=180)
         self.event = event
         self.user_tz = user_tz
         self.event_details = event  # Added to fix missing field in delete
         self.guild_id = guild_id
         self.user = user
+        self._setup_buttons()
 
-    @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
-    async def cancel_button(self, interaction: discord.Interaction, _):
+    def _setup_buttons(self):
+        # Cancel button
+        cancel_btn = Button(label="Cancel", style=discord.ButtonStyle.secondary)
+        cancel_btn.callback = self._cancel_callback
+        self.add_item(cancel_btn)
+
+        # Edit Event button (now enabled)
+        edit_btn = Button(label="Edit Event", style=discord.ButtonStyle.primary)
+        edit_btn.callback = self._edit_callback
+        self.add_item(edit_btn)
+
+        # Confirm/Change Time button - label depends on whether event is already confirmed
+        is_confirmed = self.event.confirmed_date and self.event.confirmed_date != "TBD"
+        confirm_label = "Change Time" if is_confirmed else "Confirm Date"
+        confirm_btn = Button(label=confirm_label, style=discord.ButtonStyle.success)
+        confirm_btn.callback = self._confirm_callback
+        self.add_item(confirm_btn)
+
+        # Delete button
+        delete_btn = Button(label="Delete", style=discord.ButtonStyle.danger)
+        delete_btn.callback = self._delete_callback
+        self.add_item(delete_btn)
+
+    async def _cancel_callback(self, interaction: discord.Interaction):
         if not await auth.authenticate(interaction.user, self.event.organizer):
-            await interaction.response.send_message("❌ You don’t have permission to view this event.", ephemeral=True)
+            await interaction.response.send_message("❌ You don't have permission to view this event.", ephemeral=True)
             return
 
         is_selected = str(interaction.user.id) in self.event.rsvp
@@ -229,13 +271,20 @@ class ManageEventView(utils.ExpiringView):
         await interaction.response.edit_message(view=view)
         view.message = interaction.message
 
-    @discord.ui.button(label="Edit Event", style=discord.ButtonStyle.primary, disabled=True)
-    async def edit_button(self, interaction: discord.Interaction, _):
-        # TODO: Implement edit event flow
-        await interaction.response.defer()
+    async def _edit_callback(self, interaction: discord.Interaction):
+        if not await auth.authenticate(interaction.user, self.event.organizer):
+            await interaction.response.send_message("❌ You don't have permission to edit this event.", ephemeral=True)
+            return
 
-    @discord.ui.button(label="Confirm Date", style=discord.ButtonStyle.success)
-    async def confirm_button(self, interaction: discord.Interaction, _):
+        # Show edit event options
+        view = EditEventView(self.event, self.user_tz, self.guild_id, self.user)
+        await interaction.response.edit_message(
+            content=f"✏️ **Edit {self.event.event_name}:**\nSelect what you want to edit:",
+            view=view
+        )
+        view.message = interaction.message
+
+    async def _confirm_callback(self, interaction: discord.Interaction):
         if not await auth.authenticate(interaction.user, self.event.organizer):
             await interaction.response.send_message("❌ You don't have permission to confirm this event.", ephemeral=True)
             return
@@ -253,8 +302,7 @@ class ManageEventView(utils.ExpiringView):
         )
         view.message = interaction.message
 
-    @discord.ui.button(label="Delete", style=discord.ButtonStyle.danger)
-    async def delete_button(self, interaction: discord.Interaction, _):
+    async def _delete_callback(self, interaction: discord.Interaction):
         if not await auth.authenticate(interaction.user, self.event.organizer):
             await interaction.response.send_message("❌ You don't have permission to delete this event.", ephemeral=True)
             return
@@ -264,6 +312,179 @@ class ManageEventView(utils.ExpiringView):
             self.guild_id,
             self.event.event_name,
             self.event_details
+        )
+
+
+class EditEventView(utils.ExpiringView):
+    """View for editing event properties."""
+    def __init__(self, event, user_tz, guild_id: int, user):
+        super().__init__(timeout=180)
+        self.event = event
+        self.user_tz = user_tz
+        self.guild_id = guild_id
+        self.user = user
+        self._setup_buttons()
+
+    def _setup_buttons(self):
+        # Edit Name button
+        name_btn = Button(label="Edit Name", style=discord.ButtonStyle.primary)
+        name_btn.callback = self._edit_name_callback
+        self.add_item(name_btn)
+
+        # Edit Max Attendees button
+        attendees_btn = Button(label="Edit Max Attendees", style=discord.ButtonStyle.primary)
+        attendees_btn.callback = self._edit_attendees_callback
+        self.add_item(attendees_btn)
+
+        # Add Time Slots button
+        slots_btn = Button(label="Add Time Slots", style=discord.ButtonStyle.primary)
+        slots_btn.callback = self._add_slots_callback
+        self.add_item(slots_btn)
+
+        # Back button
+        back_btn = Button(label="Back", style=discord.ButtonStyle.secondary)
+        back_btn.callback = self._back_callback
+        self.add_item(back_btn)
+
+    async def _edit_name_callback(self, interaction: discord.Interaction):
+        modal = EditEventNameModal(self.event, self.user_tz, self.guild_id, self.user)
+        await interaction.response.send_modal(modal)
+
+    async def _edit_attendees_callback(self, interaction: discord.Interaction):
+        modal = EditEventAttendeesModal(self.event, self.user_tz, self.guild_id, self.user)
+        await interaction.response.send_modal(modal)
+
+    async def _add_slots_callback(self, interaction: discord.Interaction):
+        await interaction.response.send_message(
+            "📅 Adding time slots is not yet implemented. Use `/newevent` to create a new event with different slots.",
+            ephemeral=True
+        )
+
+    async def _back_callback(self, interaction: discord.Interaction):
+        view = ManageEventView(self.event, self.user_tz, self.guild_id, self.user)
+        # Rebuild the event body
+        local_availability = utils.from_utc_to_local(self.event.availability, self.user_tz)
+        server_config = conf.get_config(self.guild_id)
+        use_24hr = getattr(server_config, "use_24hr_time", False)
+        proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_local(local_availability, use_24hr))
+
+        badges = []
+        if self.event.is_recurring:
+            badges.append("🔄 Recurring")
+        badge_line = f"✨ {' • '.join(badges)}\n" if badges else ""
+
+        # Format confirmed date
+        if self.event.confirmed_date and self.event.confirmed_date != "TBD":
+            try:
+                confirmed_dt = datetime.fromisoformat(self.event.confirmed_date)
+                confirmed_display = utils.to_discord_timestamp(confirmed_dt, 'F')
+            except ValueError:
+                confirmed_display = self.event.confirmed_date
+            body = (
+                f"📅 **Event:** `{self.event.event_name}`\n"
+                f"{badge_line}"
+                f"🙋 **Organizer:** <@{self.event.organizer}>\n"
+                f"✅ **Confirmed Date:** {confirmed_display}\n"
+            )
+        else:
+            body = (
+                f"📅 **Event:** `{self.event.event_name}`\n"
+                f"{badge_line}"
+                f"🙋 **Organizer:** <@{self.event.organizer}>\n"
+                f"✅ **Confirmed Date:** *TBD*\n"
+                f"🗓️ **Proposed Dates (Your Timezone - `{self.user_tz}`):**\n{proposed_dates or '*None yet*'}\n"
+            )
+
+        await interaction.response.edit_message(content=body, view=view)
+        view.message = interaction.message
+
+
+class EditEventNameModal(discord.ui.Modal, title="Edit Event Name"):
+    new_name = discord.ui.TextInput(label="New Event Name", placeholder="Enter new event name")
+
+    def __init__(self, event, user_tz, guild_id, user):
+        super().__init__()
+        self.event = event
+        self.user_tz = user_tz
+        self.guild_id = guild_id
+        self.user = user
+        self.new_name.default = event.event_name
+
+    async def on_submit(self, interaction: discord.Interaction):
+        old_name = self.event.event_name
+        new_name = self.new_name.value.strip()
+
+        if not new_name:
+            await interaction.response.send_message("❌ Event name cannot be empty.", ephemeral=True)
+            return
+
+        # Check if name already exists
+        existing = events.get_event(self.guild_id, new_name)
+        if existing and new_name.lower() != old_name.lower():
+            await interaction.response.send_message(f"❌ An event named `{new_name}` already exists.", ephemeral=True)
+            return
+
+        # Delete old event and create with new name
+        events.delete_event(self.guild_id, old_name)
+        self.event.event_name = new_name
+        events.modify_event(self.event)
+
+        # Update bulletin if exists
+        try:
+            from core import bulletins
+            await bulletins.update_bulletin_header(interaction.client, self.event)
+        except Exception:
+            pass
+
+        await interaction.response.send_message(
+            f"✅ Event renamed from `{old_name}` to `{new_name}`.",
+            ephemeral=True
+        )
+
+
+class EditEventAttendeesModal(discord.ui.Modal, title="Edit Max Attendees"):
+    max_attendees = discord.ui.TextInput(
+        label="Max Attendees",
+        placeholder="Enter a number or leave empty for unlimited"
+    )
+
+    def __init__(self, event, user_tz, guild_id, user):
+        super().__init__()
+        self.event = event
+        self.user_tz = user_tz
+        self.guild_id = guild_id
+        self.user = user
+        self.max_attendees.default = str(event.max_attendees) if event.max_attendees else ""
+
+    async def on_submit(self, interaction: discord.Interaction):
+        value = self.max_attendees.value.strip()
+
+        if value:
+            try:
+                max_val = int(value)
+                if max_val < 1:
+                    await interaction.response.send_message("❌ Max attendees must be at least 1.", ephemeral=True)
+                    return
+                self.event.max_attendees = str(max_val)
+            except ValueError:
+                await interaction.response.send_message("❌ Please enter a valid number.", ephemeral=True)
+                return
+        else:
+            self.event.max_attendees = None
+
+        events.modify_event(self.event)
+
+        # Update bulletin if exists
+        try:
+            from core import bulletins
+            await bulletins.update_bulletin_header(interaction.client, self.event)
+        except Exception:
+            pass
+
+        display = self.event.max_attendees or "unlimited"
+        await interaction.response.send_message(
+            f"✅ Max attendees updated to {display}.",
+            ephemeral=True
         )
 
 
@@ -387,13 +608,27 @@ class ConfirmDateView(utils.ExpiringView):
             badges.append("🔄 Recurring")
         badge_line = f"✨ {' • '.join(badges)}\n" if badges else ""
 
-        body = (
-            f"📅 **Event:** `{self.event.event_name}`\n"
-            f"{badge_line}"
-            f"🙋 **Organizer:** <@{self.event.organizer}>\n"
-            f"✅ **Confirmed Date:** *{self.event.confirmed_date or 'TBD'}*\n"
-            f"🗓️ **Proposed Dates (Your Timezone - `{self.user_tz}`):**\n{proposed_dates or '*None yet*'}\n"
-        )
+        # Format confirmed date as Discord timestamp if set
+        if self.event.confirmed_date and self.event.confirmed_date != "TBD":
+            try:
+                confirmed_dt = datetime.fromisoformat(self.event.confirmed_date)
+                confirmed_display = utils.to_discord_timestamp(confirmed_dt, 'F')
+            except ValueError:
+                confirmed_display = self.event.confirmed_date
+            body = (
+                f"📅 **Event:** `{self.event.event_name}`\n"
+                f"{badge_line}"
+                f"🙋 **Organizer:** <@{self.event.organizer}>\n"
+                f"✅ **Confirmed Date:** {confirmed_display}\n"
+            )
+        else:
+            body = (
+                f"📅 **Event:** `{self.event.event_name}`\n"
+                f"{badge_line}"
+                f"🙋 **Organizer:** <@{self.event.organizer}>\n"
+                f"✅ **Confirmed Date:** *TBD*\n"
+                f"🗓️ **Proposed Dates (Your Timezone - `{self.user_tz}`):**\n{proposed_dates or '*None yet*'}\n"
+            )
 
         await interaction.response.edit_message(content=body, view=view)
         view.message = interaction.message
@@ -447,24 +682,24 @@ class ConfirmDateView(utils.ExpiringView):
         if await auth.authenticate(self.user, self.event.organizer):
             view.add_item(ManageEventButton(self.event, self.user_tz))
 
-        local_availability = utils.from_utc_to_local(self.event.availability, self.user_tz)
-        proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_local(local_availability, self.use_24hr))
-
         badges = []
         if self.event.is_recurring:
             badges.append("🔄 Recurring")
         badge_line = f"✨ {' • '.join(badges)}\n" if badges else ""
 
+        # Format confirmed date as Discord timestamp
+        confirmed_dt = datetime.fromisoformat(self.selected_slot)
+        confirmed_display = utils.to_discord_timestamp(confirmed_dt, 'F')
+
         body = (
             f"📅 **Event:** `{self.event.event_name}`\n"
             f"{badge_line}"
             f"🙋 **Organizer:** <@{self.event.organizer}>\n"
-            f"✅ **Confirmed Date:** *{selected_label}*\n"
-            f"🗓️ **Proposed Dates (Your Timezone - `{self.user_tz}`):**\n{proposed_dates or '*None yet*'}\n"
+            f"✅ **Confirmed Date:** {confirmed_display}\n"
         )
 
         await interaction.response.edit_message(
-            content=f"✅ **Event confirmed for {selected_label}!**\n\n{body}",
+            content=f"✅ **Event confirmed for {confirmed_display}!**\n\n{body}",
             view=view
         )
         view.message = interaction.message
