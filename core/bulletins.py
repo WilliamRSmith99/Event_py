@@ -114,6 +114,11 @@ async def restore_bulletin_views(client: discord.Client):
     for guild_id, bulletin_map in all_bulletins.items():
         for head_msg_id, bulletin in bulletin_map.items():
             try:
+                # Restore the main bulletin view (Register + Notify Me buttons)
+                bulletin_view = BulletinView(bulletin.event)
+                client.add_view(bulletin_view, message_id=int(head_msg_id))
+                msg_count += 1
+
                 # For each thread message, get the emoji -> slot map
                 for message_id, emoji_to_slot in bulletin.thread_messages.items():
                     slot_list = [(emoji, slot) for emoji, slot in emoji_to_slot.items()]
@@ -123,8 +128,8 @@ async def restore_bulletin_views(client: discord.Client):
 
                     # Add view back to the client
                     client.add_view(view, message_id=int(message_id))
-                    msg_count+=1
-    
+                    msg_count += 1
+
             except Exception as e:
                 logger.warning(f"Failed to restore view for bulletin '{bulletin.event}' in guild {guild_id}", exc_info=e)
     logger.info(f"Restored {msg_count} bulletin views from disk")
