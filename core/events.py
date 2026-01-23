@@ -239,6 +239,54 @@ def delete_event(guild_id: str, event_name: str) -> bool:
         logger.warning(f"Event not found for deletion: {event_name} in guild {guild_id}")
         return False
 
+
+def rename_event(guild_id: int, old_name: str, new_name: str) -> Optional[EventState]:
+    """
+    Renames an event.
+
+    Args:
+        guild_id: The Discord guild ID
+        old_name: The current event name
+        new_name: The new event name
+
+    Returns:
+        The renamed EventState object, or None if the old event was not found
+        or the new name already exists.
+    """
+    guild_id_str = str(guild_id)
+    # Not using load_events() here to operate on the global events_list
+    
+    guild_events = events_list.get(guild_id_str, {}).get("events", {})
+
+    # Check if new name already exists
+    if new_name.lower() in [name.lower() for name in guild_events.keys()] and new_name.lower() != old_name.lower():
+        logger.warning(f"Failed to rename: new event name '{new_name}' already exists in guild {guild_id}")
+        return None
+
+    # Find and remove old event
+    event_to_rename = None
+    
+    # Need to iterate over a copy of keys since we are modifying the dict
+    for event_name in list(guild_events.keys()):
+        if event_name.lower() == old_name.lower():
+            event_to_rename = guild_events.pop(event_name)
+            break
+    
+    if not event_to_rename:
+        logger.warning(f"Failed to rename: event '{old_name}' not found in guild {guild_id}")
+        return None
+        
+    # Update name and put it back
+    event_to_rename.event_name = new_name
+    guild_events[new_name] = event_to_rename
+    
+    events_list[guild_id_str]["events"] = guild_events
+    save_events(events_list)
+    log_event_action("rename", guild_id_str, old_name, new_name=new_name)
+    
+    return event_to_rename
+
+
 def remove_user_from_queue(queue: dict, user_id: str) -> dict:
     return {str(i + 1): v for i, (k, v) in enumerate(
         (item for item in sorted(queue.items(), key=lambda x: int(x[0])) if item[1] != user_id)

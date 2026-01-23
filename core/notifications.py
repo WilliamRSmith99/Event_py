@@ -209,6 +209,63 @@ def get_users_to_notify(guild_id: int, event_name: str) -> List[NotificationPref
     return users
 
 
+def migrate_event_notification_preferences(
+    guild_id: int,
+    old_event_name: str,
+    new_event_name: str
+) -> int:
+    """
+    Migrate notification preferences from old event name to new event name.
+    
+    Called when an event is renamed to preserve user notification settings.
+    
+    Args:
+        guild_id: The Discord guild ID
+        old_event_name: The old event name
+        new_event_name: The new event name
+        
+    Returns:
+        Number of preferences migrated
+    """
+    data = load_notifications()
+    migrated_count = 0
+    
+    for key, prefs in data.get("preferences", {}).items():
+        if key.startswith(f"{guild_id}:"):
+            if old_event_name in prefs:
+                # Get the old preference
+                old_pref = NotificationPreference.from_dict(prefs[old_event_name])
+                
+                # Create new preference with updated event name
+                new_pref = NotificationPreference(
+                    user_id=old_pref.user_id,
+                    guild_id=old_pref.guild_id,
+                    event_name=new_event_name,
+                    reminder_minutes=old_pref.reminder_minutes,
+                    notify_on_start=old_pref.notify_on_start,
+                    notify_on_change=old_pref.notify_on_change,
+                    notify_on_cancel=old_pref.notify_on_cancel,
+                    created_at=old_pref.created_at
+                )
+                
+                # Save new preference
+                prefs[new_event_name] = new_pref.to_dict()
+                
+                # Remove old preference
+                del prefs[old_event_name]
+                
+                migrated_count += 1
+    
+    if migrated_count > 0:
+        save_notifications(data)
+        logger.info(
+            f"Migrated {migrated_count} notification preferences "
+            f"from '{old_event_name}' to '{new_event_name}' in guild {guild_id}"
+        )
+    
+    return migrated_count
+
+
 # =============================================================================
 # Notification Sending
 # =============================================================================

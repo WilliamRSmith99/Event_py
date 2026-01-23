@@ -514,7 +514,7 @@ class NotifyMeButton(Button):
 
     async def callback(self, interaction: discord.Interaction):
         from commands.user import notifications as notif_commands
-        await notif_commands.quick_enable_notifications(interaction, self.event_name)
+        await notif_commands.show_notification_settings(interaction, self.event_name)
 
 class RegisterSlotButton(Button):
     def __init__(self, event_name, slot_time: str, emoji_index: str):

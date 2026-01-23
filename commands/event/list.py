@@ -2,8 +2,11 @@ from discord.ui import Button
 from datetime import datetime, timedelta
 from commands.user import timezone
 from core import auth, events, utils, userdata, entitlements, notifications, conf
+from core.logging import get_logger
 from commands.event import register, responses, manage
 import discord
+
+logger = get_logger(__name__)
 
 # --- Event Rendering ---
 def group_consecutive_hours_local(local_availability: list, use_24hr: bool = False) -> list:
@@ -132,6 +135,23 @@ async def format_single_event(interaction, event, is_edit=False, inherit_view=No
 
 async def event_info(interaction: discord.Interaction, event_name: str = None):
     """Displays upcoming events or a message if no events are found."""
+    try:
+        await interaction.response.defer(ephemeral=True, thinking=True)
+    except discord.InteractionResponded:
+        # Already responded, which is unusual here, but we can proceed with followup
+        pass
+    except Exception as e:
+        logger.error(f"Error deferring interaction in event_info: {e}", exc_info=e)
+        # If we can't even defer, we probably can't send a message either, but try once.
+        try:
+            await interaction.followup.send(
+                "❌ An error occurred while loading events. Please try again.",
+                ephemeral=True
+            )
+        except:
+            pass
+        return
+
     # Use get_active_events to exclude archived/past events
     events_found = events.get_active_events(interaction.guild_id, event_name)
 
@@ -147,13 +167,25 @@ async def event_info(interaction: discord.Interaction, event_name: str = None):
             if archived:
                 message += f"\n\n*({len(archived)} past events in history)*"
 
-        await interaction.response.send_message(message, ephemeral=True)
+        await interaction.followup.send(message, ephemeral=True)
         return
 
-    await interaction.response.defer(ephemeral=True, thinking=True)
-
+    # Send events using followup
     for event in events_found.values():
-        await format_single_event(interaction, event, is_edit=False)
+        try:
+            # We use is_edit=True because we are editing the deferred "thinking" response
+            # for the first event, and then sending followups.
+            # A cleaner way is to build all messages and send once, but this is a quick fix.
+            # Let's check if a response has been sent for this interaction.
+            if not interaction.is_expired() and not interaction.response.is_done():
+                 await format_single_event(interaction, event, is_edit=False) # First one sends, subsequent are followups
+            else:
+                 await format_single_event(interaction, event, is_edit=False)
+
+        except Exception as e:
+            logger.error(f"Error formatting event {event.event_name}: {e}", exc_info=e)
+            # Continue with next event even if one fails
+            continue
 
 # --- Custom Button Implementations ---
 
@@ -418,28 +450,40 @@ class EditEventNameModal(discord.ui.Modal, title="Edit Event Name"):
             await interaction.response.send_message("❌ Event name cannot be empty.", ephemeral=True)
             return
 
-        # Check if name already exists
-        existing = events.get_event(self.guild_id, new_name)
-        if existing and new_name.lower() != old_name.lower():
-            await interaction.response.send_message(f"❌ An event named `{new_name}` already exists.", ephemeral=True)
-            return
+        # Migrate notification preferences before renaming
+        from core import notifications
+        migrated_count = notifications.migrate_event_notification_preferences(
+            self.guild_id,
+            old_name,
+            new_name
+        )
 
-        # Delete old event and create with new name
-        events.delete_event(self.guild_id, old_name)
-        self.event.event_name = new_name
-        events.modify_event(self.event)
+        # Use the new atomic rename function
+        renamed_event = events.rename_event(self.guild_id, old_name, new_name)
+
+        if not renamed_event:
+            # The rename function logs the specific error
+            await interaction.response.send_message(
+                f"❌ Failed to rename event. The name `{new_name}` might already exist.",
+                ephemeral=True
+            )
+            # Rollback notification migration if needed (or handle more gracefully)
+            notifications.migrate_event_notification_preferences(self.guild_id, new_name, old_name)
+            return
 
         # Update bulletin if exists
         try:
             from core import bulletins
-            await bulletins.update_bulletin_header(interaction.client, self.event)
-        except Exception:
+            await bulletins.update_bulletin_header(interaction.client, renamed_event)
+        except Exception as e:
+            logger.error(f"Failed to update bulletin after rename: {e}", exc_info=e)
             pass
 
-        await interaction.response.send_message(
-            f"✅ Event renamed from `{old_name}` to `{new_name}`.",
-            ephemeral=True
-        )
+        message = f"✅ Event renamed from `{old_name}` to `{new_name}`."
+        if migrated_count > 0:
+            message += f"\n\n📢 Migrated {migrated_count} notification preference(s)."
+        
+        await interaction.response.send_message(message, ephemeral=True)
 
 
 class EditEventAttendeesModal(discord.ui.Modal, title="Edit Max Attendees"):

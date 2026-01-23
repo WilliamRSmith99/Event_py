@@ -281,6 +281,7 @@ async def quick_enable_notifications(
     Quickly enable default notifications for an event.
 
     Called from bulletin NotifyMe button for fast signup.
+    Opens the notification config view immediately on first click.
     """
     guild_id = interaction.guild_id
     user_id = interaction.user.id
@@ -293,21 +294,6 @@ async def quick_enable_notifications(
         await show_notification_settings(interaction, event_name)
         return
 
-    # Enable with defaults
-    pref = notifications.NotificationPreference(
-        user_id=user_id,
-        guild_id=guild_id,
-        event_name=event_name,
-    )
-    notifications.set_notification_preference(pref)
-
-    await interaction.response.send_message(
-        f"✅ **Notifications enabled for {event_name}!**\n\n"
-        f"You'll be notified:\n"
-        f"• ⏰ 1 hour before the event\n"
-        f"• 🎉 When the event starts\n"
-        f"• 📝 If the event changes\n"
-        f"• ❌ If the event is canceled\n\n"
-        f"Use `/remindme {event_name}` to customize these settings.",
-        ephemeral=True
-    )
+    # First click - immediately open the config view (don't auto-enable)
+    # This allows users to configure their preferences right away
+    await show_notification_settings(interaction, event_name)

@@ -367,7 +367,8 @@ class NewEventModal(discord.ui.Modal, title="Create a new event"):
             return
 
         # Check event limit (free tier = 2 events)
-        all_events = events.get_events(guild_id)
+        # Only count active events (exclude archived/past events)
+        all_events = events.get_active_events(guild_id)
         current_count = len(all_events)
 
         try:
