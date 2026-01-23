@@ -1,7 +1,7 @@
 import discord
 from discord.ui import Button, View
 from commands.user import timezone
-from core import utils, userdata, events
+from core import utils, userdata, events, conf
 from core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -24,7 +24,12 @@ async def build_overlap_summary(interaction: discord.Interaction, event_name: st
     elif len(event_matches) == 1:
         event = list(event_matches.values())[0]
         local_availability = utils.from_utc_to_local(event.availability, user_tz_str)
-        view = OverlapSummaryView(event, local_availability, user_tz_str)
+
+        # Get time format preference
+        server_config = conf.get_config(interaction.guild_id)
+        use_24hr = getattr(server_config, "use_24hr_time", False)
+
+        view = OverlapSummaryView(event, local_availability, user_tz_str, use_24hr=use_24hr)
         await interaction.response.send_message(
             f"📊 Top availability slots for **{event.event_name}**", view=view, ephemeral=True)
     else:
@@ -64,7 +69,10 @@ class OverlapSummaryButton(Button):
             usernames.append(member.display_name if member else f"<@{uid}>")
 
         date_str = local_dt.strftime("%B %d")
-        time_str = local_dt.strftime("%I:%M %p").lstrip("0")
+        # Get time format preference
+        server_config = conf.get_config(interaction.guild_id)
+        use_24hr = getattr(server_config, "use_24hr_time", False)
+        time_str = utils.format_time(local_dt, use_24hr)
 
         attendee_view = AttendeeView(self.view, self.datetime_iso)
         await interaction.response.edit_message(
@@ -115,7 +123,8 @@ class NavButton(Button):
             user_timezone=self.user_timezone,
             date_page=date_page,
             time_page=time_page,
-            show_back_button=self.parent_view.show_back_button
+            show_back_button=self.parent_view.show_back_button,
+            use_24hr=self.parent_view.use_24hr
         )
 
         await interaction.response.edit_message(
@@ -133,7 +142,7 @@ class BackToInfoButton(Button):
         await format_single_event(interaction, self.event, is_edit=True)
 
 class OverlapSummaryView(View):
-    def __init__(self, event, local_availability, user_timezone: str, date_page: int = 0, time_page: int = 0, show_back_button: bool = False):
+    def __init__(self, event, local_availability, user_timezone: str, date_page: int = 0, time_page: int = 0, show_back_button: bool = False, use_24hr: bool = False):
         super().__init__(timeout=None)
         self.event = event
         self.local_availability = local_availability
@@ -141,6 +150,7 @@ class OverlapSummaryView(View):
         self.date_page = date_page
         self.time_page = time_page
         self.show_back_button = show_back_button
+        self.use_24hr = use_24hr
 
         self.date_slots = []
         self.all_slots = []
@@ -174,7 +184,7 @@ class OverlapSummaryView(View):
             paginated_slots = sorted_slots[time_start:time_end]
 
             for local_dt, utc_iso, signup_map in paginated_slots:
-                time_str = local_dt.strftime("%I:%M %p").lstrip("0")
+                time_str = utils.format_time(local_dt, self.use_24hr)
                 label = f"{time_str} ({len(signup_map)})"
                 self.add_item(OverlapSummaryButton(label, utc_iso, row=row_index))
 

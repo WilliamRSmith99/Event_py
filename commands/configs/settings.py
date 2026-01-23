@@ -5,8 +5,8 @@ from core import conf
 
 settings_schema = {
     0: ["Roles and Permissions", '\n`Manage who can configure the bot, create events, or RSVP.`\n    • Admin Roles — Can configure bot settings and manage all events.\n   • Event Organizer Roles — Can create and manage their own events.\n   • Event Attendee Roles — Can RSVP to events and receive reminders'],
-    1: ["Bulletin", '\n`Configure public event announcements in a specific channel.`\n   • Enable Bulletin Settings — Toggle automatic posting of events to a public channel.\n   • Bulletin Channel — The text channel where announcements will be posted. (Only visible when enabled)'],
-    2: ["Display", '\n`Configure Visual and Display Settings`']
+    1: ["Bulletin", '\n`Configure public event announcements in a specific channel.`\n   • Enable Bulletin Settings — Toggle automatic posting of events to a public channel.\n   • Bulletin Channel — The text channel where announcements will be posted.\n   • Use Threads — Toggle between threaded time slots or a simple register button.'],
+    2: ["Display", '\n`Configure Visual and Display Settings`\n   • Time Format — Choose between 12-hour (1:00 PM) or 24-hour (13:00) format.']
 }
 
 
@@ -32,9 +32,10 @@ class PaginatedSettingsView(View):
         elif label == "Bulletin":
             self.add_item(SettingsToggleButton(self, label=label))
             self.add_item(CustomChannelSelect(self, "Bulletin Channel"))
+            self.add_item(BulletinThreadsToggle(self))
 
         elif label == "Display":
-            pass
+            self.add_item(TimeFormatToggle(self))
 
         # Recreate nav buttons each time with correct enabled/disabled state
         self.add_item(PreviousButton(self))
@@ -110,6 +111,42 @@ class SettingsToggleButton(Button):
     async def callback(self, interaction: discord.Interaction):
         current = getattr(self.parent.config, self.setting_key, False)
         setattr(self.parent.config, self.setting_key, not current)
+        self.parent.render_current_page()
+        await interaction.response.edit_message(view=self.parent)
+
+
+class TimeFormatToggle(Button):
+    """Toggle between 12-hour and 24-hour time format."""
+    def __init__(self, parent: PaginatedSettingsView):
+        self.parent = parent
+        use_24hr = getattr(parent.config, "use_24hr_time", False)
+        label = "🕐 24-hour format (13:00)" if use_24hr else "🕐 12-hour format (1:00 PM)"
+        style = discord.ButtonStyle.primary
+
+        super().__init__(label=label, style=style, row=0)
+
+    async def callback(self, interaction: discord.Interaction):
+        current = getattr(self.parent.config, "use_24hr_time", False)
+        setattr(self.parent.config, "use_24hr_time", not current)
+        self.parent.render_current_page()
+        await interaction.response.edit_message(view=self.parent)
+
+
+class BulletinThreadsToggle(Button):
+    """Toggle between threads and simple register button for bulletins."""
+    def __init__(self, parent: PaginatedSettingsView):
+        self.parent = parent
+        use_threads = getattr(parent.config, "bulletin_use_threads", True)
+        label = "📋 Using Threads" if use_threads else "📋 Using Register Button"
+        style = discord.ButtonStyle.success if use_threads else discord.ButtonStyle.secondary
+        # Disable if bulletin settings are not enabled
+        disabled = not getattr(parent.config, "bulletin_settings_enabled", False)
+
+        super().__init__(label=label, style=style, row=2, disabled=disabled)
+
+    async def callback(self, interaction: discord.Interaction):
+        current = getattr(self.parent.config, "bulletin_use_threads", True)
+        setattr(self.parent.config, "bulletin_use_threads", not current)
         self.parent.render_current_page()
         await interaction.response.edit_message(view=self.parent)
 

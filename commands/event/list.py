@@ -1,15 +1,19 @@
 from discord.ui import Button
 from datetime import datetime, timedelta
 from commands.user import timezone
-from core import auth, events, utils, userdata, entitlements, notifications
+from core import auth, events, utils, userdata, entitlements, notifications, conf
 from commands.event import register, responses, manage
 import discord
 
 # --- Event Rendering ---
-def group_consecutive_hours_local(local_availability: list) -> list:
+def group_consecutive_hours_local(local_availability: list, use_24hr: bool = False) -> list:
     """
     Accepts list of (date_string, [(local_dt, utc_str, rsvps_dict), ...])
     Groups by date, merges consecutive slots, and finds max RSVPs per range.
+
+    Args:
+        local_availability: List of availability data
+        use_24hr: If True, use 24-hour time format
     """
     output = []
 
@@ -35,16 +39,18 @@ def group_consecutive_hours_local(local_availability: list) -> list:
                 max_rsvps = max(max_rsvps, rsvp_count)
             else:
                 # close current merged range
+                time_range = utils.format_time_range(current_start, current_end, use_24hr)
                 merged_ranges.append(
-                    f"\n        --`{current_start.strftime('%I%p').lower()} -> {current_end.strftime('%I%p').lower()}` (RSVPs: {max_rsvps})"
+                    f"\n        --`{time_range}` (RSVPs: {max_rsvps})"
                 )
                 current_start = local_dt
                 current_end = slot_end
                 max_rsvps = rsvp_count
 
         # Final range
+        time_range = utils.format_time_range(current_start, current_end, use_24hr)
         merged_ranges.append(
-            f"\n        --`{current_start.strftime('%I%p').lower()} -> {current_end.strftime('%I%p').lower()}` (RSVPs: {max_rsvps})"
+            f"\n        --`{time_range}` (RSVPs: {max_rsvps})"
         )
 
         output.append(f"{date_str} {''.join(merged_ranges)}")
@@ -63,8 +69,13 @@ async def format_single_event(interaction, event, is_edit=False, inherit_view=No
         )
         view.message = msg
         return
+
+    # Get server time format preference
+    server_config = conf.get_config(interaction.guild_id)
+    use_24hr = getattr(server_config, "use_24hr_time", False)
+
     local_availability = utils.from_utc_to_local(event.availability, user_tz)
-    proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_local(local_availability))
+    proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_local(local_availability, use_24hr))
 
     # Build premium badges/indicators
     badges = []
@@ -290,11 +301,15 @@ class ConfirmDateView(utils.ExpiringView):
         self.page = page
         self.selected_slot = None
 
+        # Get server time format preference
+        server_config = conf.get_config(guild_id)
+        self.use_24hr = getattr(server_config, "use_24hr_time", False)
+
         # Flatten all slots with their info
         self.all_slots = []
         for date_label, slots in local_availability:
             for local_dt, utc_iso, signup_map in slots:
-                time_str = local_dt.strftime("%a %m/%d %I:%M %p")
+                time_str = utils.format_time(local_dt, self.use_24hr, include_date=True)
                 self.all_slots.append((time_str, utc_iso, len(signup_map)))
 
         # Sort by attendee count (descending)
@@ -365,7 +380,7 @@ class ConfirmDateView(utils.ExpiringView):
             view.add_item(ManageEventButton(self.event, self.user_tz))
 
         local_availability = utils.from_utc_to_local(self.event.availability, self.user_tz)
-        proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_local(local_availability))
+        proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_local(local_availability, self.use_24hr))
 
         badges = []
         if self.event.is_recurring:
@@ -425,7 +440,7 @@ class ConfirmDateView(utils.ExpiringView):
             view.add_item(ManageEventButton(self.event, self.user_tz))
 
         local_availability = utils.from_utc_to_local(self.event.availability, self.user_tz)
-        proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_local(local_availability))
+        proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_local(local_availability, self.use_24hr))
 
         badges = []
         if self.event.is_recurring:

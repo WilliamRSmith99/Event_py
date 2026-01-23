@@ -96,8 +96,8 @@ class SubmitDateButton(discord.ui.Button):
             self.view.stop()
 
 class SelectAllTimesButton(discord.ui.Button):
-    def __init__(self, event_data, parent_view, date):
-        super().__init__(label="Select All", style=discord.ButtonStyle.secondary)
+    def __init__(self, event_data, parent_view, date, row: int = 4):
+        super().__init__(label="Select All on Page", style=discord.ButtonStyle.secondary, row=row)
         self.event_data = event_data
         self.parent_view = parent_view
         self.date = date
@@ -107,21 +107,76 @@ class SelectAllTimesButton(discord.ui.Button):
             await interaction.response.send_message("You're not authorized to modify this.", ephemeral=True)
             return
 
-        # Toggle: if all selected, deselect all; otherwise select all
-        all_times = {f"{slot % 12 or 12} {'AM' if slot < 12 else 'PM'}" for slot in range(24)}
+        # Toggle: if all on current page selected, deselect all; otherwise select all on page
+        page_times = self.parent_view.get_current_page_times()
 
-        if self.parent_view.selected_slots == all_times:
-            self.parent_view.selected_slots.clear()
+        if page_times.issubset(self.parent_view.selected_slots):
+            self.parent_view.selected_slots -= page_times
         else:
-            self.parent_view.selected_slots = all_times.copy()
+            self.parent_view.selected_slots |= page_times
 
         self.parent_view.update_buttons()
         await interaction.response.edit_message(view=self.parent_view)
 
 
+class EarlierTimesButton(discord.ui.Button):
+    """Button to show earlier times (AM)."""
+    def __init__(self, event_data, parent_view, row: int = 3):
+        disabled = parent_view.current_page == 0
+        super().__init__(label="◀ Earlier Times", style=discord.ButtonStyle.primary, row=row, disabled=disabled)
+        self.event_data = event_data
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.event_data.organizer:
+            await interaction.response.send_message("You're not authorized to modify this.", ephemeral=True)
+            return
+
+        self.parent_view.current_page = 0
+        self.parent_view.update_buttons()
+        await interaction.response.edit_message(view=self.parent_view)
+
+
+class LaterTimesButton(discord.ui.Button):
+    """Button to show later times (PM)."""
+    def __init__(self, event_data, parent_view, row: int = 3):
+        disabled = parent_view.current_page == 1
+        super().__init__(label="Later Times ▶", style=discord.ButtonStyle.primary, row=row, disabled=disabled)
+        self.event_data = event_data
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.event_data.organizer:
+            await interaction.response.send_message("You're not authorized to modify this.", ephemeral=True)
+            return
+
+        self.parent_view.current_page = 1
+        self.parent_view.update_buttons()
+        await interaction.response.edit_message(view=self.parent_view)
+
+
+class CancelTimeSelectionButton(discord.ui.Button):
+    """Button to cancel time selection."""
+    def __init__(self, event_data, parent_view, row: int = 4):
+        super().__init__(label="Cancel", style=discord.ButtonStyle.danger, row=row)
+        self.event_data = event_data
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.event_data.organizer:
+            await interaction.response.send_message("You're not authorized to modify this.", ephemeral=True)
+            return
+
+        await interaction.response.edit_message(
+            content="❌ **Event creation cancelled.**",
+            view=None
+        )
+        self.parent_view.stop()
+
+
 class SubmitTimeButton(discord.ui.Button):
-    def __init__(self, event_data, parent_view, date):
-        super().__init__(label="Submit Times", style=discord.ButtonStyle.primary)
+    def __init__(self, event_data, parent_view, date, row: int = 4):
+        super().__init__(label="✔ Submit Times", style=discord.ButtonStyle.success, row=row)
         self.event_data = event_data
         self.parent_view = parent_view
         self.date = date
@@ -221,23 +276,55 @@ class ProposedDateSelectionView(discord.ui.View):
         await self.interaction.edit_original_response(view=self)
 
 class ProposedTimeSelectionView(discord.ui.View):
+    """
+    Paginated time selection view.
+
+    Shows 12 hours per page (AM or PM) to stay within Discord's 25-component limit.
+    Page 0 = AM (12 AM - 11 AM), Page 1 = PM (12 PM - 11 PM)
+    """
     def __init__(self, interaction: discord.Interaction, event_data, date: str):
         super().__init__(timeout=180)
         self.event_data = event_data
         self.date = date
         self.selected_slots = set()
         self.interaction = interaction
+        self.current_page = 0  # 0 = AM, 1 = PM
         self.update_buttons()
+
+    def get_current_page_times(self) -> set:
+        """Get the set of time labels for the current page."""
+        if self.current_page == 0:  # AM
+            return {f"{slot % 12 or 12}:00 AM" for slot in range(12)}
+        else:  # PM
+            return {f"{slot % 12 or 12}:00 PM" for slot in range(12)}
 
     def update_buttons(self):
         self.clear_items()
-        for slot in range(24):
-            time_label = f"{slot % 12 or 12} {'AM' if slot < 12 else 'PM'}"
-            style = discord.ButtonStyle.success if time_label in self.selected_slots else discord.ButtonStyle.secondary
-            self.add_item(DateButton(time_label, self.event_data, self, style=style))
 
-        self.add_item(SelectAllTimesButton(self.event_data, self, self.date))
-        self.add_item(SubmitTimeButton(self.event_data, self, self.date))
+        # Determine which hours to show based on current page
+        if self.current_page == 0:  # AM page
+            hours = range(0, 12)  # 12 AM to 11 AM
+            period = "AM"
+        else:  # PM page
+            hours = range(12, 24)  # 12 PM to 11 PM
+            period = "PM"
+
+        # Add time buttons for current page (12 buttons, rows 0-2)
+        for i, slot in enumerate(hours):
+            time_label = f"{slot % 12 or 12}:00 {period}"
+            style = discord.ButtonStyle.success if time_label in self.selected_slots else discord.ButtonStyle.secondary
+            btn = DateButton(time_label, self.event_data, self, style=style)
+            btn.row = i // 4  # 4 buttons per row = 3 rows for 12 buttons
+            self.add_item(btn)
+
+        # Add page navigation buttons (row 3)
+        self.add_item(EarlierTimesButton(self.event_data, self, row=3))
+        self.add_item(LaterTimesButton(self.event_data, self, row=3))
+
+        # Add Select All, Submit, and Cancel buttons (row 4)
+        self.add_item(SelectAllTimesButton(self.event_data, self, self.date, row=4))
+        self.add_item(SubmitTimeButton(self.event_data, self, self.date, row=4))
+        self.add_item(CancelTimeSelectionButton(self.event_data, self, row=4))
 
     async def on_timeout(self):
         for item in self.children:

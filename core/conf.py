@@ -24,6 +24,12 @@ class ServerConfigState:
     default_reminder_minutes: int = 60  # 1 hour before
     notification_channel: Optional[str] = None  # Channel for server-wide announcements
 
+    # Display settings
+    use_24hr_time: bool = False  # False = 12hr format (default), True = 24hr format
+
+    # Bulletin settings
+    bulletin_use_threads: bool = True  # True = use threads (default), False = register button only
+
     def __post_init__(self):
         self.admin_roles = self.admin_roles or []
         self.event_organizer_roles = self.event_organizer_roles or []
@@ -37,6 +43,10 @@ class ServerConfigState:
             self.display_settings_enabled = True
         if self.notifications_enabled is None:
             self.notifications_enabled = True
+        if self.use_24hr_time is None:
+            self.use_24hr_time = False
+        if self.bulletin_use_threads is None:
+            self.bulletin_use_threads = True
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -51,6 +61,8 @@ class ServerConfigState:
             "notifications_enabled": self.notifications_enabled,
             "default_reminder_minutes": self.default_reminder_minutes,
             "notification_channel": self.notification_channel,
+            "use_24hr_time": self.use_24hr_time,
+            "bulletin_use_threads": self.bulletin_use_threads,
         }
 
     @staticmethod
@@ -67,6 +79,8 @@ class ServerConfigState:
             notifications_enabled=data.get("notifications_enabled", True),
             default_reminder_minutes=data.get("default_reminder_minutes", 60),
             notification_channel=data.get("notification_channel", None),
+            use_24hr_time=data.get("use_24hr_time", False),
+            bulletin_use_threads=data.get("bulletin_use_threads", True),
         )
 
 

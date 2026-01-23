@@ -11,15 +11,30 @@ logger = get_logger(__name__)
 def to_utc_isoformat(datetime_str: str, user_timezone: str) -> str:
     """
     Convert a local user time string to UTC ISO format.
+
+    Supports formats:
+    - "Monday, 01/23/26 at 12:00 PM" (new format with :00 and space)
+    - "Monday, 01/23/26 at 12PM" (legacy format)
     """
     local_tz = pytz.timezone(user_timezone)
-    try:
-        naive = datetime.strptime(datetime_str, "%A, %m/%d/%y at %I%p")
-        localized = local_tz.localize(naive)
-        return localized.astimezone(pytz.utc).isoformat()  # Convert to UTC and return ISO format
-    except Exception as e:
-        logger.warning(f"Error converting to UTC: {datetime_str}", exc_info=e)
-        return datetime_str  # Return the original string if an error occurs
+
+    # Try multiple formats for flexibility
+    formats = [
+        "%A, %m/%d/%y at %I:%M %p",  # New format: "Monday, 01/23/26 at 12:00 PM"
+        "%A, %m/%d/%y at %I %p",      # Format with space: "Monday, 01/23/26 at 12 PM"
+        "%A, %m/%d/%y at %I%p",       # Legacy format: "Monday, 01/23/26 at 12PM"
+    ]
+
+    for fmt in formats:
+        try:
+            naive = datetime.strptime(datetime_str, fmt)
+            localized = local_tz.localize(naive)
+            return localized.astimezone(pytz.utc).isoformat()
+        except ValueError:
+            continue
+
+    logger.warning(f"Error converting to UTC - no format matched: {datetime_str}")
+    return datetime_str
 
 
 from collections import defaultdict
@@ -79,6 +94,65 @@ def to_discord_timestamp(dt: datetime, style: str = 't') -> str:
 
     unix_ts = int(dt.timestamp())
     return f"<t:{unix_ts}:{style}>"
+
+
+def format_time(dt: datetime, use_24hr: bool = False, include_date: bool = False) -> str:
+    """
+    Format a datetime for display, respecting the time format preference.
+
+    Args:
+        dt: The datetime to format
+        use_24hr: If True, use 24-hour format (13:00). If False, use 12-hour (1:00 PM)
+        include_date: If True, include the date in the output
+
+    Returns:
+        Formatted time string
+    """
+    if use_24hr:
+        time_fmt = "%H:%M"
+    else:
+        time_fmt = "%I:%M %p"
+
+    if include_date:
+        date_fmt = "%a %m/%d "
+        return dt.strftime(date_fmt + time_fmt).lstrip("0")
+    else:
+        return dt.strftime(time_fmt).lstrip("0")
+
+
+def format_time_range(start_dt: datetime, end_dt: datetime, use_24hr: bool = False) -> str:
+    """
+    Format a time range for display.
+
+    Args:
+        start_dt: Start datetime
+        end_dt: End datetime
+        use_24hr: If True, use 24-hour format
+
+    Returns:
+        Formatted range like "1:00 PM -> 3:00 PM" or "13:00 -> 15:00"
+    """
+    if use_24hr:
+        return f"{start_dt.strftime('%H:%M')} -> {end_dt.strftime('%H:%M')}"
+    else:
+        return f"{start_dt.strftime('%I%p').lower()} -> {end_dt.strftime('%I%p').lower()}"
+
+
+def format_hour(dt: datetime, use_24hr: bool = False) -> str:
+    """
+    Format just the hour for display (no minutes).
+
+    Args:
+        dt: The datetime
+        use_24hr: If True, use 24-hour format
+
+    Returns:
+        Formatted hour like "1 PM" or "13:00"
+    """
+    if use_24hr:
+        return dt.strftime("%H:%M")
+    else:
+        return dt.strftime("%-I %p")
         
 def get_timezone_groups():
     """Group and return timezones by their region."""

@@ -1,6 +1,6 @@
 import discord
 from commands.user import timezone
-from core import utils, events, userdata, bulletins
+from core import utils, events, userdata, bulletins, conf
 from core.logging import get_logger, log_event_action
 from discord.ui import Button, View
 from discord import ButtonStyle
@@ -58,7 +58,11 @@ async def schedule_command(interaction: discord.Interaction, event_name: str, ep
             )
             return
 
-    view = PaginatedHourSelectionView(event, local_slots_by_date, str(interaction.user.id))
+    # Get time format preference
+    server_config = conf.get_config(interaction.guild_id)
+    use_24hr = getattr(server_config, "use_24hr_time", False)
+
+    view = PaginatedHourSelectionView(event, local_slots_by_date, str(interaction.user.id), use_24hr=use_24hr)
 
     try:
         if interaction.type.name == "component" and not eph_resp:
@@ -69,22 +73,23 @@ async def schedule_command(interaction: discord.Interaction, event_name: str, ep
         await interaction.followup.send(f"❌ Failed to display schedule view: {str(e)}", ephemeral=True)    
 
 class PaginatedHourSelectionView(View):
-    def __init__(self, event, slots_data_by_date, user_id):
+    def __init__(self, event, slots_data_by_date, user_id, use_24hr: bool = False):
         super().__init__(timeout=900)
         self.event = event
         self.user_id = user_id
         self.page = 0
         self.current_date_index = 0
         self.selected_utc_keys = set()
+        self.use_24hr = use_24hr
 
-        self.date_objs = [] 
+        self.date_objs = []
         self.slots_by_date = []
 
         for date_label, slots in slots_data_by_date:
             processed_slots = []
             for local_dt, utc_iso_str, users in slots:
                 date_key = local_dt.strftime("%A, %m/%d/%y")
-                hour_key = local_dt.strftime("%-I %p")
+                hour_key = utils.format_hour(local_dt, use_24hr)
                 processed_slots.append((utc_iso_str, local_dt, date_key, hour_key, users))
 
                 if user_id in users.values():

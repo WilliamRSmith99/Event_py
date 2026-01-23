@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Dict, Any, Union
 from core.storage import read_json, write_json_atomic
-from core import events, utils
+from core import events, utils, conf
 from core.logging import get_logger, log_event_action
 from datetime import datetime, timedelta
 from commands.event import register
@@ -237,53 +237,90 @@ async def generate_new_bulletin(interaction: discord.Interaction, event_data, se
     if not channel:
         logger.warning(f"Bulletin channel not found: {server_config.bulletin_channel} in guild {interaction.guild.id}")
         return  # Skip if channel is not found
-    # try:
+
+    # Check if we should use threads or just a register button
+    use_threads = getattr(server_config, "bulletin_use_threads", True)
+
     event_data.bulletin_channel_id = str(server_config.bulletin_channel)
     proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_timestamp(event_data.availability))
 
-    bulletin_body = (
-        f"📅 **Event:** `{event_data.event_name}`\n"
-        f"🙋 **Organizer:** <@{event_data.organizer}>\n"
-        f"✅ **Confirmed Date:** *{event_data.confirmed_date or 'TBD'}*\n"
-        f"🗓️ **Proposed Dates:**\n{proposed_dates or '*None yet*'}\n\n\n"
-        "      ⬇️ \"Register\" below or select times manually in the thread below!"
-    )
-    bulletin_view=BulletinView(event_data.event_name)
-    bulletin_msg =await channel.send(content=bulletin_body, view=None)
-    event_data.bulletin_message_id = str(bulletin_msg.id)
-    bulletin = BulletinMessageEntry(
-        event=event_data.event_name,
-        guild_id=event_data.guild_id,
-        channel_id=server_config.bulletin_channel,
-        msg_head_id=f"{bulletin_msg.id}" 
-    )   
-    thread_messages = generate_thread_messages(event_data)
-    
-    thread = await bulletin_msg.create_thread(
-        name=f"🧵 {event_data.event_name} Signups",
-        auto_archive_duration=60,
-        reason="Auto-thread for public event"
-    )
-    bulletin.thread_id = thread.id
-    slots_to_msg = {}
-    for embed, map in thread_messages:
-        slot_list = [(emoji, slot) for emoji, slot in map.items()]            
-        view = ThreadView(event_data.event_name, slot_list)
-        thread_msg = await thread.send(embed=embed, view=view)
-        bulletin.thread_messages[thread_msg.id] = map
+    if use_threads:
+        # Full bulletin with thread for time slot selection
+        bulletin_body = (
+            f"📅 **Event:** `{event_data.event_name}`\n"
+            f"🙋 **Organizer:** <@{event_data.organizer}>\n"
+            f"✅ **Confirmed Date:** *{event_data.confirmed_date or 'TBD'}*\n"
+            f"🗓️ **Proposed Dates:**\n{proposed_dates or '*None yet*'}\n\n\n"
+            "      ⬇️ \"Register\" below or select times manually in the thread below!"
+        )
+        bulletin_view = BulletinView(event_data.event_name)
+        bulletin_msg = await channel.send(content=bulletin_body, view=bulletin_view)
+        event_data.bulletin_message_id = str(bulletin_msg.id)
 
-        slots_to_msg.update({f"{slot}":{"thread_id": f"{thread.id}", "message_id": f"{thread_msg.id}", "embed_index": f"{emoji}"} for emoji, slot in map.items()})
-    
-    event_data.availability_to_message_map =  slots_to_msg
-    events.modify_event(event_data)
-    modify_event_bulletin(guild_id=interaction.guild.id, entry=bulletin)
-    await interaction.response.edit_message(
-    content=f"✅ **Finished setting up available times for {event_data.event_name}!**\nPosted bulletin and created signup thread in <#{server_config.bulletin_channel}>.",
-    view=None
-    )
+        bulletin = BulletinMessageEntry(
+            event=event_data.event_name,
+            guild_id=event_data.guild_id,
+            channel_id=server_config.bulletin_channel,
+            msg_head_id=f"{bulletin_msg.id}"
+        )
 
-    # except Exception as e:
-    #     print(f"Failed to post bulletin in channel {server_config.bulletin_channel}: {e}")
+        thread_messages = generate_thread_messages(event_data)
+
+        thread = await bulletin_msg.create_thread(
+            name=f"🧵 {event_data.event_name} Signups",
+            auto_archive_duration=60,
+            reason="Auto-thread for public event"
+        )
+        bulletin.thread_id = thread.id
+        event_data.bulletin_thread_id = thread.id
+        slots_to_msg = {}
+
+        for embed, map in thread_messages:
+            slot_list = [(emoji, slot) for emoji, slot in map.items()]
+            view = ThreadView(event_data.event_name, slot_list)
+            thread_msg = await thread.send(embed=embed, view=view)
+            bulletin.thread_messages[thread_msg.id] = map
+
+            slots_to_msg.update({
+                f"{slot}": {"thread_id": f"{thread.id}", "message_id": f"{thread_msg.id}", "embed_index": f"{emoji}"}
+                for emoji, slot in map.items()
+            })
+
+        event_data.availability_to_message_map = slots_to_msg
+        events.modify_event(event_data)
+        modify_event_bulletin(guild_id=interaction.guild.id, entry=bulletin)
+
+        await interaction.response.edit_message(
+            content=f"✅ **Finished setting up available times for {event_data.event_name}!**\nPosted bulletin and created signup thread in <#{server_config.bulletin_channel}>.",
+            view=None
+        )
+    else:
+        # Simple bulletin with just a register button (no threads)
+        bulletin_body = (
+            f"📅 **Event:** `{event_data.event_name}`\n"
+            f"🙋 **Organizer:** <@{event_data.organizer}>\n"
+            f"✅ **Confirmed Date:** *{event_data.confirmed_date or 'TBD'}*\n"
+            f"🗓️ **Proposed Dates:**\n{proposed_dates or '*None yet*'}\n\n"
+            "      ⬇️ Click \"Register\" to sign up for time slots!"
+        )
+        bulletin_view = BulletinView(event_data.event_name)
+        bulletin_msg = await channel.send(content=bulletin_body, view=bulletin_view)
+        event_data.bulletin_message_id = str(bulletin_msg.id)
+
+        bulletin = BulletinMessageEntry(
+            event=event_data.event_name,
+            guild_id=event_data.guild_id,
+            channel_id=server_config.bulletin_channel,
+            msg_head_id=f"{bulletin_msg.id}"
+        )
+
+        events.modify_event(event_data)
+        modify_event_bulletin(guild_id=interaction.guild.id, entry=bulletin)
+
+        await interaction.response.edit_message(
+            content=f"✅ **Finished setting up available times for {event_data.event_name}!**\nPosted bulletin in <#{server_config.bulletin_channel}>.",
+            view=None
+        )
 
 async def update_bulletin_header(client: discord.Client, event_data: events.EventState):
     bulletin = client.get_channel(int(event_data.bulletin_channel_id))
