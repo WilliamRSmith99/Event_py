@@ -439,8 +439,10 @@ class NotificationScheduler:
         """Check for pending notifications and send them."""
         # Import here to avoid circular imports
         from core import events, bulletins
+        from datetime import timezone
 
-        now = datetime.utcnow()
+        now_naive = datetime.utcnow()
+        now_aware = datetime.now(timezone.utc)
         all_events = {}
 
         # Archive past events and update their bulletins (runs every check)
@@ -474,6 +476,9 @@ class NotificationScheduler:
                 event_time = datetime.fromisoformat(event.confirmed_date)
             except ValueError:
                 continue
+
+            # Use timezone-aware or naive now based on event_time
+            now = now_aware if event_time.tzinfo is not None else now_naive
 
             # Get users who want notifications
             users = get_users_to_notify(guild_id, event.event_name)
