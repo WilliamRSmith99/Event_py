@@ -102,8 +102,9 @@ async def on_ready():
 
     # Sync slash commands
     if guild:
+        tree.clear_commands(guild=guild)
         await tree.sync(guild=guild)
-        logger.info(f"Slash commands synced to dev guild: {config.DEV_GUILD_ID}")
+        logger.info(f"Slash commands cleared and synced to dev guild: {config.DEV_GUILD_ID}")
     else:
         await tree.sync()
         logger.info("Slash commands synced globally (may take up to 1 hour to propagate)")
