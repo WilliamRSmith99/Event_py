@@ -201,12 +201,12 @@ class RegisterButton(Button):
     async def callback(self, interaction: discord.Interaction):
         await register.schedule_command(interaction, self.event_name)
 
-class InfoButton(Button):
+class ViewAttendeesButton(Button):
     def __init__(self, event, user_tz):
         self.event = event
         self.user_tz = user_tz
         self.event_name = event.event_name
-        super().__init__(label="Info", style=discord.ButtonStyle.secondary, custom_id=f"info:{self.event_name}")
+        super().__init__(label="View Attendees", style=discord.ButtonStyle.secondary, custom_id=f"info:{self.event_name}")
 
     async def callback(self, interaction: discord.Interaction):
         local_availability = utils.from_utc_to_local( self.event.availability, self.user_tz)
@@ -251,7 +251,7 @@ class EventView(utils.ExpiringView):
     def __init__(self, event, user_tz, is_selected=False):
         super().__init__(timeout=180)
         self.add_item(RegisterButton(event, is_selected))
-        self.add_item(InfoButton(event, user_tz))
+        self.add_item(ViewAttendeesButton(event, user_tz))
 
 class ManageEventView(utils.ExpiringView):
     def __init__(self, event, user_tz, guild_id: int, user):

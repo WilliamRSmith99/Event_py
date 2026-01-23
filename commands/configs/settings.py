@@ -58,7 +58,7 @@ class SettingsRoleSelect(RoleSelect):
             min_values=0,
             max_values=25,
             default_values=valid_roles,
-            disabled=getattr(self.parent.config, "roles_and_permissions_settings_enabled", False)
+            disabled=not getattr(self.parent.config, "roles_and_permissions_settings_enabled", False)
         )
 
     async def callback(self, interaction: discord.Interaction):
