@@ -102,6 +102,12 @@ async def on_ready():
 
     # Sync slash commands
     if guild:
+        # Clear any stale global commands that may conflict with guild commands
+        tree.clear_commands(guild=None)
+        await tree.sync()  # Sync empty global to Discord
+        logger.info("Cleared stale global commands")
+
+        # Now sync guild-specific commands
         await tree.sync(guild=guild)
         logger.info(f"Slash commands synced to dev guild: {config.DEV_GUILD_ID}")
     else:
