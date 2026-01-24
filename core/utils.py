@@ -166,9 +166,46 @@ def get_timezone_groups():
 
 async def safe_send(interaction: discord.Interaction, content: str, view: Optional[discord.ui.View] = None):
     if interaction.response.is_done():
-        await interaction.edit_original_response(content=content, view=view)
+        if view is not None:
+            await interaction.edit_original_response(content=content, view=view)
+        else:
+            await interaction.edit_original_response(content=content)
     else:
-        await interaction.response.send_message(content=content, view=view, ephemeral=True)
+        if view is not None:
+            await interaction.response.send_message(content=content, view=view, ephemeral=True)
+        else:
+            await interaction.response.send_message(content=content, ephemeral=True)
+
+
+async def safe_respond(
+    interaction: discord.Interaction,
+    content: str,
+    ephemeral: bool = True,
+    view: Optional[discord.ui.View] = None
+):
+    """
+    Safely respond to an interaction, handling both initial response and follow-up cases.
+    Returns the message object if available.
+    """
+    try:
+        if interaction.response.is_done():
+            if view is not None:
+                msg = await interaction.followup.send(content=content, view=view, ephemeral=ephemeral, wait=True)
+            else:
+                msg = await interaction.followup.send(content=content, ephemeral=ephemeral, wait=True)
+            return msg
+        else:
+            if view is not None:
+                await interaction.response.send_message(content=content, view=view, ephemeral=ephemeral)
+            else:
+                await interaction.response.send_message(content=content, ephemeral=ephemeral)
+            return await interaction.original_response()
+    except discord.NotFound:
+        logger.warning("Interaction expired before response could be sent")
+        return None
+    except discord.HTTPException as e:
+        logger.error(f"Failed to respond to interaction: {e}")
+        return None
 
 class ExpiringView(discord.ui.View):
     def __init__(self, *, timeout=180):
