@@ -12,6 +12,7 @@ from commands.admin import premium
 from core import auth, utils, events, userdata, bulletins, notifications, logging as bot_logging
 from core.database import init_database
 from core.stripe_integration import is_stripe_configured
+from core.views import GlobalBulletinView, GlobalThreadView
 
 # =============================================================================
 # Validate Configuration
@@ -42,7 +43,7 @@ client = discord.Client(intents=intents)
 tree = discord.app_commands.CommandTree(client)
 
 # Optional: Restrict to dev guild for faster command sync during development
-guild = discord.Object(id=config.DEV_GUILD_ID) if config.DEV_GUILD_ID else None
+guild = discord.Object(id=config.DEV_GUILD_ID) if config.DEV_GUILD_I else None
 
 
 # ============================================================
@@ -100,6 +101,10 @@ async def on_ready():
     init_database()
     logger.info("Database initialized")
 
+    # Add persistent views
+    client.add_view(GlobalBulletinView())
+    client.add_view(GlobalThreadView())
+    
     # Sync slash commands
     if guild:
         # Clear any stale global commands that may conflict with guild commands
@@ -113,8 +118,6 @@ async def on_ready():
     else:
         await tree.sync()
         logger.info("Slash commands synced globally (may take up to 1 hour to propagate)")
-
-    await bulletins.restore_bulletin_views(client)
 
     # Start notification scheduler
     notifications.init_scheduler(client)

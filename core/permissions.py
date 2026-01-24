@@ -170,7 +170,7 @@ async def require_permission(
 # Legacy Compatibility
 # =============================================================================
 
-async def authenticate(user: discord.User | discord.Member, organizer_id: int) -> bool:
+async def authenticate(user: Union[discord.User, discord.Member], organizer_id: int) -> bool:
     """
     Legacy authentication function for backward compatibility.
 

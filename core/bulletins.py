@@ -7,137 +7,14 @@ from datetime import datetime, timedelta
 from commands.event import register
 import discord
 from discord.ui import Button, View
+from core.views import GlobalBulletinView, GlobalThreadView
+from core.emojis import EMOJIS_MAP
 
 logger = get_logger(__name__)
 
 
 
-EMOJIS_MAP = {"0":'1️⃣',"1":'2️⃣',"2":'3️⃣',"3":'4️⃣',"4":'5️⃣',"5":'6️⃣',"6":'7️⃣',"7":'8️⃣',"8":'9️⃣'}
-EVENT_BULLETIN_FILE_NAME = "event_bulletin.json"
-
-# ========== Data Model ==========
-
-@dataclass
-class BulletinMessageEntry:
-    event: str = ""
-    msg_head_id: str = ""
-    guild_id: str = ""
-    channel_id: str = ""
-    thread_id: str = ""
-    thread_messages: Dict[str, Dict[str, str]] = field(default_factory=dict)
-    # Structure: {THREAD_MSG_ID: {"options": {emoji: value}}}
-
-    @staticmethod
-    def from_dict(data: Dict[str, Any]) -> "BulletinMessageEntry":
-        return BulletinMessageEntry(
-            event=data.get("event", ""),
-            msg_head_id=data.get("msg_head_id", ""),
-            guild_id=data.get("guild_id", ""),
-            channel_id=data.get("channel_id", ""),
-            thread_id=data.get("thread_id", ""),
-            thread_messages=data.get("thread_messages", {})
-        )
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "event": self.event,
-            "msg_head_id": self.msg_head_id,
-            "thread_id": self.thread_id,
-            "guild_id": self.guild_id,
-            "channel_id": self.channel_id,
-            "thread_messages": self.thread_messages
-        }
-
-# ========== In-Memory Store ==========
-
-def load_event_bulletins() -> Dict[str, Dict[str, BulletinMessageEntry]]:
-    try:
-        raw = read_json(EVENT_BULLETIN_FILE_NAME)
-        return {
-            guild_id: {
-                head_msg_id: BulletinMessageEntry.from_dict(head_data)
-                for head_msg_id, head_data in guild_data.items()
-            }
-            for guild_id, guild_data in raw.items()
-        }
-    except FileNotFoundError:
-        return {}
-
-# ========== Save ==========
-
-def save_event_bulletins(data: Dict[str, Dict[str, BulletinMessageEntry]]) -> None:
-    to_save = {
-        guild_id: {
-            head_msg_id: entry.to_dict()
-            for head_msg_id, entry in head_msgs.items()
-        }
-        for guild_id, head_msgs in data.items()
-    }
-    write_json_atomic(EVENT_BULLETIN_FILE_NAME, to_save)
-
-# ========== CRUD ==========
-
-def get_event_bulletin(guild_id: Union[str, int]) -> Dict[str, BulletinMessageEntry]:
-    event_bulletins = load_event_bulletins()
-    gid = str(guild_id)
-    if gid not in event_bulletins:
-        event_bulletins[gid] = {}
-        save_event_bulletins(event_bulletins)
-    return event_bulletins[gid]
-
-def modify_event_bulletin(guild_id: Union[str, int], entry: BulletinMessageEntry) -> None:
-    head_msg_id = entry.msg_head_id
-    event_bulletins = load_event_bulletins()
-    gid = str(guild_id)
-    if gid not in event_bulletins:
-        event_bulletins[gid] = {}
-    event_bulletins[gid][head_msg_id] = entry
-    save_event_bulletins(event_bulletins)
-
-def delete_event_bulletin(guild_id: Union[str, int], head_msg_id: str) -> bool:
-    event_bulletins = load_event_bulletins()
-    gid = str(guild_id)
-    try:
-        del event_bulletins[gid][head_msg_id]
-        if not event_bulletins[gid]:
-            del event_bulletins[gid]
-        save_event_bulletins(event_bulletins)
-        return True
-    except KeyError:
-        return False
-
 # ========== General Bulletin Logic ==========
-
-async def restore_bulletin_views(client: discord.Client):
-    all_bulletins = load_event_bulletins()
-    msg_count = 0
-    for guild_id, bulletin_map in all_bulletins.items():
-        # Get server config to check if threads are enabled
-        server_config = conf.get_config(int(guild_id))
-        use_threads = getattr(server_config, "bulletin_use_threads", True) if server_config else True
-
-        for head_msg_id, bulletin in bulletin_map.items():
-            try:
-                # Restore the main bulletin view
-                # Show register button only when threads are disabled
-                bulletin_view = BulletinView(bulletin.event, show_register=not use_threads)
-                client.add_view(bulletin_view, message_id=int(head_msg_id))
-                msg_count += 1
-
-                # For each thread message, get the emoji -> slot map
-                for message_id, emoji_to_slot in bulletin.thread_messages.items():
-                    slot_list = [(emoji, slot) for emoji, slot in emoji_to_slot.items()]
-
-                    # Create the ThreadView again
-                    view = ThreadView(bulletin.event, slot_list)
-
-                    # Add view back to the client
-                    client.add_view(view, message_id=int(message_id))
-                    msg_count += 1
-
-            except Exception as e:
-                logger.warning(f"Failed to restore view for bulletin '{bulletin.event}' in guild {guild_id}", exc_info=e)
-    logger.info(f"Restored {msg_count} bulletin views from disk")
 
 def format_discord_timestamp(iso_str: str) -> str:
     """Return a Discord full timestamp (<t:...:f>) from UTC ISO string."""
@@ -264,16 +141,9 @@ async def generate_new_bulletin(interaction: discord.Interaction, event_data, se
             f"🗓️ **Proposed Dates:**\n{proposed_dates or '*None yet*'}\n\n\n"
             "      ⬇️ Select times in the thread below!"
         )
-        bulletin_view = BulletinView(event_data.event_name, show_register=False)
+        bulletin_view = GlobalBulletinView()
         bulletin_msg = await channel.send(content=bulletin_body, view=bulletin_view)
         event_data.bulletin_message_id = str(bulletin_msg.id)
-
-        bulletin = BulletinMessageEntry(
-            event=event_data.event_name,
-            guild_id=event_data.guild_id,
-            channel_id=server_config.bulletin_channel,
-            msg_head_id=f"{bulletin_msg.id}"
-        )
 
         thread_messages = generate_thread_messages(event_data)
 
@@ -282,15 +152,13 @@ async def generate_new_bulletin(interaction: discord.Interaction, event_data, se
             auto_archive_duration=60,
             reason="Auto-thread for public event"
         )
-        bulletin.thread_id = thread.id
         event_data.bulletin_thread_id = thread.id
         slots_to_msg = {}
 
         for embed, map in thread_messages:
             slot_list = [(emoji, slot) for emoji, slot in map.items()]
-            view = ThreadView(event_data.event_name, slot_list)
+            view = GlobalThreadView(event_data.event_name, slot_list)
             thread_msg = await thread.send(embed=embed, view=view)
-            bulletin.thread_messages[thread_msg.id] = map
 
             slots_to_msg.update({
                 f"{slot}": {"thread_id": f"{thread.id}", "message_id": f"{thread_msg.id}", "embed_index": f"{emoji}"}
@@ -299,7 +167,6 @@ async def generate_new_bulletin(interaction: discord.Interaction, event_data, se
 
         event_data.availability_to_message_map = slots_to_msg
         events.modify_event(event_data)
-        modify_event_bulletin(guild_id=interaction.guild.id, entry=bulletin)
 
         await interaction.response.edit_message(
             content=f"✅ **Finished setting up available times for {event_data.event_name}!**\nPosted bulletin and created signup thread in <#{server_config.bulletin_channel}>.",
@@ -314,19 +181,11 @@ async def generate_new_bulletin(interaction: discord.Interaction, event_data, se
             f"🗓️ **Proposed Dates:**\n{proposed_dates or '*None yet*'}\n\n"
             "      ⬇️ Click \"Register\" to sign up for time slots!"
         )
-        bulletin_view = BulletinView(event_data.event_name)
+        bulletin_view = GlobalBulletinView()
         bulletin_msg = await channel.send(content=bulletin_body, view=bulletin_view)
         event_data.bulletin_message_id = str(bulletin_msg.id)
 
-        bulletin = BulletinMessageEntry(
-            event=event_data.event_name,
-            guild_id=event_data.guild_id,
-            channel_id=server_config.bulletin_channel,
-            msg_head_id=f"{bulletin_msg.id}"
-        )
-
         events.modify_event(event_data)
-        modify_event_bulletin(guild_id=interaction.guild.id, entry=bulletin)
 
         await interaction.response.edit_message(
             content=f"✅ **Finished setting up available times for {event_data.event_name}!**\nPosted bulletin in <#{server_config.bulletin_channel}>.",
@@ -384,7 +243,7 @@ async def update_bulletin_header(client: discord.Client, event_data: events.Even
                 "      ⬇️ Click \"Register\" to sign up!\n"
             )
             # When confirmed, always show register button (single slot to register for)
-            bulletin_view = BulletinView(event_data.event_name, show_register=True)
+            bulletin_view = GlobalBulletinView()
         else:
             proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_timestamp(event_data.availability))
             if use_threads:
@@ -395,7 +254,7 @@ async def update_bulletin_header(client: discord.Client, event_data: events.Even
                     f"🗓️ **Proposed Dates:**\n{proposed_dates or '*None yet*'}\n\n\n"
                     "      ⬇️ Select times in the thread below!\n"
                 )
-                bulletin_view = BulletinView(event_data.event_name, show_register=False)
+                bulletin_view = GlobalBulletinView()
             else:
                 bulletin_body = (
                     f"📅 **Event:** `{event_data.event_name}`\n"
@@ -404,7 +263,7 @@ async def update_bulletin_header(client: discord.Client, event_data: events.Even
                     f"🗓️ **Proposed Dates:**\n{proposed_dates or '*None yet*'}\n\n\n"
                     "      ⬇️ Click \"Register\" to sign up for time slots!\n"
                 )
-                bulletin_view = BulletinView(event_data.event_name, show_register=True)
+                bulletin_view = GlobalBulletinView()
 
         await head_msg.edit(content=bulletin_body, view=bulletin_view)
         logger.info(f"Updated bulletin header for '{event_data.event_name}'")
@@ -421,11 +280,9 @@ async def update_bulletin_header(client: discord.Client, event_data: events.Even
 async def delete_bulletin_message(client: discord.Client, event_data: events.EventState) -> bool:
     """
     Delete the bulletin message and thread for an event.
-
     Args:
         client: Discord client
         event_data: The event whose bulletin should be deleted
-
     Returns:
         True if deleted successfully
     """
@@ -443,15 +300,11 @@ async def delete_bulletin_message(client: discord.Client, event_data: events.Eve
         # Delete the message (this also deletes the thread)
         await head_msg.delete()
 
-        # Clean up the bulletin entry from storage
-        delete_event_bulletin(event_data.guild_id, event_data.bulletin_message_id)
-
         logger.info(f"Deleted bulletin for '{event_data.event_name}'")
         return True
 
     except discord.NotFound:
-        # Message already deleted, just clean up storage
-        delete_event_bulletin(event_data.guild_id, event_data.bulletin_message_id)
+        # Message already deleted
         return True
     except Exception as e:
         logger.error(f"Failed to delete bulletin: {e}")
@@ -493,11 +346,7 @@ async def handle_slot_selection(interaction: discord.Interaction, selected_slot:
     new_embed = generate_single_embed_for_message(event_data[event_name], str(message.id))
     if new_embed:
         # Rebuild the view (button rows) for this embed
-        view = ThreadView(event_data[event_name].event_name, [
-            (info["embed_index"], slot)
-            for slot, info in event_data[event_name].availability_to_message_map.items()
-            if info["message_id"] == str(message.id)
-        ])
+        view = GlobalThreadView()
         await message.edit(embed=new_embed, view=view)
 
     # Update main bulletin head message
@@ -506,92 +355,14 @@ async def handle_slot_selection(interaction: discord.Interaction, selected_slot:
     # Save updated events
     events.modify_event(event_data[event_name])
 
-# ========== Bulletin View ==========
-
-class RegisterButton(Button):
-    def __init__(self, event_name):
-        self.event_name = event_name
-        button_label = "Register"
-        button_style = discord.ButtonStyle.primary
-        custom_id = f"register:{self.event_name}"
-        super().__init__(label=button_label, style=button_style, custom_id=custom_id)
-
-    async def callback(self, interaction: discord.Interaction):
-        await register.schedule_command(interaction, self.event_name, eph_resp=True)
-
-class NotifyMeButton(Button):
-    def __init__(self, event_name):
-        self.event_name = event_name
-        button_label = "Notify Me"
-        button_style = discord.ButtonStyle.secondary
-        custom_id = f"notify:{self.event_name}"
-        super().__init__(label=button_label, style=button_style, custom_id=custom_id)
-
-    async def callback(self, interaction: discord.Interaction):
-        from commands.user import notifications as notif_commands
-        await notif_commands.show_notification_settings(interaction, self.event_name)
-
-class RegisterSlotButton(Button):
-    def __init__(self, event_name, slot_time: str, emoji_index: str):
-
-        self.event_name = event_name
-        self.slot_time = slot_time
-        self.emoji_index = emoji_index
-        self.emoji_icon = EMOJIS_MAP.get(str(emoji_index), "⚠️ 404")
-        button_label = f"{self.emoji_icon}"
-        button_style = discord.ButtonStyle.primary
-        custom_id = f"register:{self.event_name}:{slot_time}"
-        super().__init__(label=button_label, style=button_style, custom_id=custom_id)
-
-    async def callback(self, interaction: discord.Interaction):
-        # Access event + slot info
-        event_name, slot_time = self.event_name, self.slot_time
-
-        await interaction.response.defer(ephemeral=True)
-
-        # Register the user for this slot
-        await handle_slot_selection(
-            interaction=interaction,
-            event_name=event_name,
-            selected_slot=slot_time
-        )
-
-class BulletinView(View):
-    def __init__(self, event_name, show_register: bool = True):
-        super().__init__(timeout=None)
-        # Only show Register button when threads are disabled (users need a way to register)
-        # When threads are enabled, users register in the thread via slot buttons
-        if show_register:
-            self.add_item(RegisterButton(event_name))
-        self.add_item(NotifyMeButton(event_name))
-
-class ThreadView(View):
-    def __init__(self, event_name, slots: list[tuple[str, str]]):
-        """
-        :param event_name: Event identifier
-        :param slots: List of (emoji, slot_time) tuples
-        :param selected_slot: Optional string of current selected slot   custom_id=f"{event_name}:thread:{slots[0][1]}"
-        """
-        self.event_name = event_name
-        super().__init__(timeout=None)
-
-        for emoji, slot in slots:
-            self.add_item(RegisterSlotButton(event_name, slot, emoji))
-
-
-# ========== Past Event Bulletin Updates ==========
-
 async def mark_bulletin_as_past(client: discord.Client, event_data: events.EventState) -> bool:
     """
     Update a bulletin to show the event has ended.
-
     Removes interactive buttons and updates the message to indicate
     the event is now in the past.
-
     Args:
         client: Discord client
         event_data: The event that has ended
-
     Returns:
         True if updated successfully
     """
@@ -627,21 +398,6 @@ async def mark_bulletin_as_past(client: discord.Client, event_data: events.Event
         # Remove view (disables buttons)
         await head_msg.edit(content=bulletin_body, view=None)
 
-        # Also update thread messages to remove buttons
-        bulletin_entry = get_event_bulletin(event_data.guild_id).get(str(event_data.bulletin_message_id))
-        if bulletin_entry and bulletin_entry.thread_id:
-            thread = client.get_channel(int(bulletin_entry.thread_id))
-            if thread:
-                for msg_id in bulletin_entry.thread_messages:
-                    try:
-                        thread_msg = await thread.fetch_message(int(msg_id))
-                        # Keep embed but remove buttons
-                        await thread_msg.edit(view=None)
-                    except discord.NotFound:
-                        pass
-                    except Exception as e:
-                        logger.warning(f"Failed to update thread message {msg_id}: {e}")
-
         logger.info(f"Marked bulletin for '{event_data.event_name}' as past")
         return True
 
@@ -656,11 +412,9 @@ async def mark_bulletin_as_past(client: discord.Client, event_data: events.Event
 async def update_past_event_bulletins(client: discord.Client, guild_id: int) -> int:
     """
     Update all bulletins for past events in a guild.
-
     Args:
         client: Discord client
         guild_id: Guild ID
-
     Returns:
         Number of bulletins updated
     """
