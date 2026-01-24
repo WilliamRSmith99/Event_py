@@ -102,3 +102,78 @@ class UserRepository:
         """Get the total number of users with data."""
         row = execute_one("SELECT COUNT(*) as count FROM user_data")
         return row["count"] if row else 0
+
+    @staticmethod
+    def get_time_format(user_id: int) -> Optional[bool]:
+        """
+        Get a user's time format preference.
+
+        Args:
+            user_id: Discord user ID
+
+        Returns:
+            True for 24hr, False for 12hr, None if not set (use server default)
+        """
+        row = execute_one(
+            "SELECT use_24hr_time FROM user_data WHERE user_id = ?",
+            (str(user_id),)
+        )
+        if row and row["use_24hr_time"] is not None:
+            return bool(row["use_24hr_time"])
+        return None
+
+    @staticmethod
+    def set_time_format(user_id: int, use_24hr: bool) -> bool:
+        """
+        Set a user's time format preference.
+
+        Args:
+            user_id: Discord user ID
+            use_24hr: True for 24-hour format, False for 12-hour
+
+        Returns:
+            True if set successfully
+        """
+        try:
+            execute_write(
+                """
+                INSERT INTO user_data (user_id, use_24hr_time)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    use_24hr_time = excluded.use_24hr_time,
+                    updated_at = datetime('now')
+                """,
+                (str(user_id), 1 if use_24hr else 0)
+            )
+            logger.debug(f"Set time format for user {user_id}: {'24hr' if use_24hr else '12hr'}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to set time format: {e}")
+            return False
+
+    @staticmethod
+    def clear_time_format(user_id: int) -> bool:
+        """
+        Clear a user's time format preference (revert to server default).
+
+        Args:
+            user_id: Discord user ID
+
+        Returns:
+            True if cleared successfully
+        """
+        try:
+            execute_write(
+                """
+                UPDATE user_data SET use_24hr_time = NULL, updated_at = datetime('now')
+                WHERE user_id = ?
+                """,
+                (str(user_id),)
+            )
+            logger.debug(f"Cleared time format for user {user_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to clear time format: {e}")
+            return False

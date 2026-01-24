@@ -74,9 +74,8 @@ async def schedule_command(interaction: discord.Interaction, event_name: str, ep
             )
             return
 
-    # Get time format preference
-    server_config = conf.get_config(interaction.guild_id)
-    use_24hr = getattr(server_config, "use_24hr_time", False)
+    # Get user's effective time format preference
+    use_24hr = userdata.get_effective_time_format(interaction.user.id, interaction.guild_id)
 
     view = PaginatedHourSelectionView(event, local_slots_by_date, str(interaction.user.id), use_24hr=use_24hr)
 

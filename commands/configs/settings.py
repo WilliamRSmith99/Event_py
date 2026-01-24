@@ -197,6 +197,25 @@ class SubmitButton(Button):
 
     async def callback(self, interaction: discord.Interaction):
         conf.modify_config(self.parent.config)
+
+        # Update all bulletins in this guild to reflect new settings (e.g., time format)
+        try:
+            from core import events, bulletins
+            all_events = events.get_active_events(interaction.guild_id)
+            updated = 0
+            for event in all_events.values():
+                if event.bulletin_message_id:
+                    await bulletins.update_bulletin_header(interaction.client, event)
+                    updated += 1
+            if updated > 0:
+                await interaction.response.edit_message(
+                    content=f"✅ Settings saved successfully! Updated {updated} bulletin(s).",
+                    view=None
+                )
+                return
+        except Exception:
+            pass  # Don't fail settings save if bulletin update fails
+
         await interaction.response.edit_message(content="✅ Settings saved successfully!", view=None)
 
 

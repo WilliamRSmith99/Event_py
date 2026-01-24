@@ -362,10 +362,25 @@ async def update_bulletin_header(client: discord.Client, event_data: events.Even
 
         # Only show proposed dates if event is not yet confirmed
         if is_confirmed:
+            # Count attendees for the confirmed slot
+            confirmed_slot_data = event_data.availability.get(event_data.confirmed_date, {})
+            attendee_count = len(confirmed_slot_data)
+            max_display = f"/{event_data.max_attendees}" if event_data.max_attendees else ""
+
+            # Calculate waitlist if max_attendees is set
+            waitlist_line = ""
+            if event_data.max_attendees:
+                max_int = int(event_data.max_attendees)
+                waitlist_count = sum(1 for pos in confirmed_slot_data.keys() if int(pos) > max_int)
+                if waitlist_count > 0:
+                    waitlist_line = f"⏳ **Waitlist:** {waitlist_count}\n"
+
             bulletin_body = (
                 f"📅 **Event:** `{event_data.event_name}`\n"
                 f"🙋 **Organizer:** <@{event_data.organizer}>\n"
-                f"✅ **Confirmed Date:** {confirmed_display}\n\n"
+                f"✅ **Confirmed Date:** {confirmed_display}\n"
+                f"👥 **Registered:** {attendee_count}{max_display}\n"
+                f"{waitlist_line}\n"
                 "      ⬇️ Click \"Register\" to sign up!\n"
             )
             # When confirmed, always show register button (single slot to register for)

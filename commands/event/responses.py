@@ -26,9 +26,8 @@ async def build_overlap_summary(interaction: discord.Interaction, event_name: st
         event = list(event_matches.values())[0]
         local_availability = utils.from_utc_to_local(event.availability, user_tz_str)
 
-        # Get time format preference
-        server_config = conf.get_config(interaction.guild_id)
-        use_24hr = getattr(server_config, "use_24hr_time", False)
+        # Get user's effective time format preference
+        use_24hr = userdata.get_effective_time_format(interaction.user.id, interaction.guild_id)
 
         view = OverlapSummaryView(event, local_availability, user_tz_str, use_24hr=use_24hr)
         await interaction.response.send_message(
@@ -69,9 +68,8 @@ class OverlapSummaryButton(Button):
             usernames.append(member.display_name if member else f"<@{uid}>")
 
         date_str = local_dt.strftime("%B %d")
-        # Get time format preference
-        server_config = conf.get_config(interaction.guild_id)
-        use_24hr = getattr(server_config, "use_24hr_time", False)
+        # Get user's effective time format preference
+        use_24hr = userdata.get_effective_time_format(interaction.user.id, interaction.guild_id)
         time_str = utils.format_time(local_dt, use_24hr)
 
         attendee_view = AttendeeView(self.view, self.datetime_iso)

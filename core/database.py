@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 DB_PATH = Path(config.DATA_DIR) / "eventbot.db"
 
 # Schema version for migrations
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 # =============================================================================
@@ -368,6 +368,16 @@ def init_database() -> None:
         current_version = result[0] if result[0] else 0
 
         if current_version < SCHEMA_VERSION:
+            # Run migrations
+            if current_version < 2:
+                # Add use_24hr_time column to user_data
+                try:
+                    cursor.execute("ALTER TABLE user_data ADD COLUMN use_24hr_time INTEGER")
+                    logger.info("Migration: Added use_24hr_time column to user_data")
+                except sqlite3.OperationalError:
+                    # Column already exists
+                    pass
+
             cursor.execute(
                 "INSERT INTO schema_version (version) VALUES (?)",
                 (SCHEMA_VERSION,)

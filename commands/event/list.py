@@ -73,9 +73,8 @@ async def format_single_event(interaction, event, is_edit=False, inherit_view=No
         view.message = msg
         return
 
-    # Get server time format preference
-    server_config = conf.get_config(interaction.guild_id)
-    use_24hr = getattr(server_config, "use_24hr_time", False)
+    # Get user's effective time format preference (user pref > server default)
+    use_24hr = userdata.get_effective_time_format(interaction.user.id, interaction.guild_id)
 
     local_availability = utils.from_utc_to_local(event.availability, user_tz)
     proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_local(local_availability, use_24hr))
@@ -99,11 +98,26 @@ async def format_single_event(interaction, event, is_edit=False, inherit_view=No
 
     # Only show proposed dates if event is not yet confirmed
     if event.confirmed_date and event.confirmed_date != "TBD":
+        # Count attendees for the confirmed slot
+        confirmed_slot_data = event.availability.get(event.confirmed_date, {})
+        attendee_count = len(confirmed_slot_data)
+        max_display = f"/{event.max_attendees}" if event.max_attendees else ""
+
+        # Calculate waitlist if max_attendees is set
+        waitlist_line = ""
+        if event.max_attendees:
+            max_int = int(event.max_attendees)
+            waitlist_count = sum(1 for pos in confirmed_slot_data.keys() if int(pos) > max_int)
+            if waitlist_count > 0:
+                waitlist_line = f"⏳ **Waitlist:** {waitlist_count}\n"
+
         body = (
             f"📅 **Event:** `{event.event_name}`\n"
             f"{badge_line}"
             f"🙋 **Organizer:** <@{event.organizer}>\n"
             f"✅ **Confirmed Date:** {confirmed_display}\n"
+            f"👥 **Registered:** {attendee_count}{max_display}\n"
+            f"{waitlist_line}"
         )
     else:
         body = (
@@ -396,8 +410,7 @@ class EditEventView(utils.ExpiringView):
         view = ManageEventView(self.event, self.user_tz, self.guild_id, self.user)
         # Rebuild the event body
         local_availability = utils.from_utc_to_local(self.event.availability, self.user_tz)
-        server_config = conf.get_config(self.guild_id)
-        use_24hr = getattr(server_config, "use_24hr_time", False)
+        use_24hr = userdata.get_effective_time_format(self.user.id, self.guild_id)
         proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_local(local_availability, use_24hr))
 
         badges = []
@@ -412,11 +425,26 @@ class EditEventView(utils.ExpiringView):
                 confirmed_display = utils.to_discord_timestamp(confirmed_dt, 'F')
             except ValueError:
                 confirmed_display = self.event.confirmed_date
+            # Count attendees for the confirmed slot
+            confirmed_slot_data = self.event.availability.get(self.event.confirmed_date, {})
+            attendee_count = len(confirmed_slot_data)
+            max_display = f"/{self.event.max_attendees}" if self.event.max_attendees else ""
+
+            # Calculate waitlist if max_attendees is set
+            waitlist_line = ""
+            if self.event.max_attendees:
+                max_int = int(self.event.max_attendees)
+                waitlist_count = sum(1 for pos in confirmed_slot_data.keys() if int(pos) > max_int)
+                if waitlist_count > 0:
+                    waitlist_line = f"⏳ **Waitlist:** {waitlist_count}\n"
+
             body = (
                 f"📅 **Event:** `{self.event.event_name}`\n"
                 f"{badge_line}"
                 f"🙋 **Organizer:** <@{self.event.organizer}>\n"
                 f"✅ **Confirmed Date:** {confirmed_display}\n"
+                f"👥 **Registered:** {attendee_count}{max_display}\n"
+                f"{waitlist_line}"
             )
         else:
             body = (
@@ -566,9 +594,8 @@ class ConfirmDateView(utils.ExpiringView):
         self.page = page
         self.selected_slot = None
 
-        # Get server time format preference
-        server_config = conf.get_config(guild_id)
-        self.use_24hr = getattr(server_config, "use_24hr_time", False)
+        # Get user's effective time format preference
+        self.use_24hr = userdata.get_effective_time_format(user.id, guild_id)
 
         # Flatten all slots with their info
         self.all_slots = []
@@ -659,11 +686,26 @@ class ConfirmDateView(utils.ExpiringView):
                 confirmed_display = utils.to_discord_timestamp(confirmed_dt, 'F')
             except ValueError:
                 confirmed_display = self.event.confirmed_date
+            # Count attendees for the confirmed slot
+            confirmed_slot_data = self.event.availability.get(self.event.confirmed_date, {})
+            attendee_count = len(confirmed_slot_data)
+            max_display = f"/{self.event.max_attendees}" if self.event.max_attendees else ""
+
+            # Calculate waitlist if max_attendees is set
+            waitlist_line = ""
+            if self.event.max_attendees:
+                max_int = int(self.event.max_attendees)
+                waitlist_count = sum(1 for pos in confirmed_slot_data.keys() if int(pos) > max_int)
+                if waitlist_count > 0:
+                    waitlist_line = f"⏳ **Waitlist:** {waitlist_count}\n"
+
             body = (
                 f"📅 **Event:** `{self.event.event_name}`\n"
                 f"{badge_line}"
                 f"🙋 **Organizer:** <@{self.event.organizer}>\n"
                 f"✅ **Confirmed Date:** {confirmed_display}\n"
+                f"👥 **Registered:** {attendee_count}{max_display}\n"
+                f"{waitlist_line}"
             )
         else:
             body = (
@@ -735,11 +777,26 @@ class ConfirmDateView(utils.ExpiringView):
         confirmed_dt = datetime.fromisoformat(self.selected_slot)
         confirmed_display = utils.to_discord_timestamp(confirmed_dt, 'F')
 
+        # Count attendees for the newly confirmed slot
+        confirmed_slot_data = self.event.availability.get(self.selected_slot, {})
+        attendee_count = len(confirmed_slot_data)
+        max_display = f"/{self.event.max_attendees}" if self.event.max_attendees else ""
+
+        # Calculate waitlist if max_attendees is set
+        waitlist_line = ""
+        if self.event.max_attendees:
+            max_int = int(self.event.max_attendees)
+            waitlist_count = sum(1 for pos in confirmed_slot_data.keys() if int(pos) > max_int)
+            if waitlist_count > 0:
+                waitlist_line = f"⏳ **Waitlist:** {waitlist_count}\n"
+
         body = (
             f"📅 **Event:** `{self.event.event_name}`\n"
             f"{badge_line}"
             f"🙋 **Organizer:** <@{self.event.organizer}>\n"
             f"✅ **Confirmed Date:** {confirmed_display}\n"
+            f"👥 **Registered:** {attendee_count}{max_display}\n"
+            f"{waitlist_line}"
         )
 
         await interaction.response.edit_message(
