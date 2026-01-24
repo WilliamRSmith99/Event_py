@@ -109,35 +109,23 @@ def delete_event_bulletin(guild_id: Union[str, int], head_msg_id: str) -> bool:
 # ========== General Bulletin Logic ==========
 
 async def restore_bulletin_views(client: discord.Client):
+    """
+    Load bulletin data from disk at startup.
+
+    Note: Button interactions are now handled globally by the on_interaction
+    event in bot.py, so we don't need to register per-message views.
+    This function just logs what bulletins exist for diagnostics.
+    """
     all_bulletins = load_event_bulletins()
-    msg_count = 0
+    bulletin_count = 0
+    thread_msg_count = 0
+
     for guild_id, bulletin_map in all_bulletins.items():
-        # Get server config to check if threads are enabled
-        server_config = conf.get_config(int(guild_id))
-        use_threads = getattr(server_config, "bulletin_use_threads", True) if server_config else True
-
         for head_msg_id, bulletin in bulletin_map.items():
-            try:
-                # Restore the main bulletin view
-                # Show register button only when threads are disabled
-                bulletin_view = BulletinView(bulletin.event, show_register=not use_threads)
-                client.add_view(bulletin_view, message_id=int(head_msg_id))
-                msg_count += 1
+            bulletin_count += 1
+            thread_msg_count += len(bulletin.thread_messages)
 
-                # For each thread message, get the emoji -> slot map
-                for message_id, emoji_to_slot in bulletin.thread_messages.items():
-                    slot_list = [(emoji, slot) for emoji, slot in emoji_to_slot.items()]
-
-                    # Create the ThreadView again
-                    view = ThreadView(bulletin.event, slot_list)
-
-                    # Add view back to the client
-                    client.add_view(view, message_id=int(message_id))
-                    msg_count += 1
-
-            except Exception as e:
-                logger.warning(f"Failed to restore view for bulletin '{bulletin.event}' in guild {guild_id}", exc_info=e)
-    logger.info(f"Restored {msg_count} bulletin views from disk")
+    logger.info(f"Found {bulletin_count} bulletins with {thread_msg_count} thread messages")
 
 def format_discord_timestamp(iso_str: str) -> str:
     """Return a Discord full timestamp (<t:...:f>) from UTC ISO string."""

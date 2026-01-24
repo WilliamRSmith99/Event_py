@@ -91,6 +91,40 @@ async def subscription(interaction: discord.Interaction):
 # ============================================================
 
 @client.event
+async def on_interaction(interaction: discord.Interaction):
+    """Global interaction handler for persistent button clicks."""
+    # Only handle component interactions (buttons, selects)
+    if interaction.type != discord.InteractionType.component:
+        return
+
+    custom_id = interaction.data.get("custom_id", "")
+
+    # Handle bulletin register button: register:{event_name}
+    if custom_id.startswith("register:"):
+        parts = custom_id.split(":")
+        if len(parts) == 2:
+            # Main register button: register:{event_name}
+            event_name = parts[1]
+            await register.schedule_command(interaction, event_name, eph_resp=True)
+            return
+        elif len(parts) == 3:
+            # Thread slot button: register:{event_name}:{slot_time}
+            event_name = parts[1]
+            slot_time = parts[2]
+            await interaction.response.defer(ephemeral=True)
+            await bulletins.handle_slot_selection(interaction, slot_time, event_name)
+            return
+
+    # Handle notify button: notify:{event_name}
+    if custom_id.startswith("notify:"):
+        parts = custom_id.split(":")
+        if len(parts) >= 2:
+            event_name = parts[1]
+            await notif_commands.show_notification_settings(interaction, event_name)
+            return
+
+
+@client.event
 async def on_ready():
     """Event triggered when the bot is ready and connected."""
     logger.info(f"Logged in as {client.user}")
