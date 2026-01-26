@@ -80,12 +80,16 @@ async def schedule_command(interaction: discord.Interaction, event_name: str, ep
     view = PaginatedHourSelectionView(event, local_slots_by_date, interaction.user.id, use_24hr=use_24hr)
 
     try:
-        if interaction.type.name == "component" and not eph_resp:
+        if interaction.response.is_done():
+            await interaction.followup.send(content=view.render_date_label(), view=view, ephemeral=True)
+        elif interaction.type.name == "component" and not eph_resp:
             await interaction.response.edit_message(content=view.render_date_label(), view=view)
         else:
             await interaction.response.send_message(content=view.render_date_label(), view=view, ephemeral=True)
     except discord.HTTPException as e:
-        await interaction.followup.send(f"❌ Failed to display schedule view: {str(e)}", ephemeral=True)
+        logger.warning(f"Failed to display schedule view: {e}")
+        if not interaction.response.is_done():
+            await interaction.response.send_message("❌ Failed to display schedule view. Please try again.", ephemeral=True)
 
 
 async def _toggle_single_slot_registration(interaction: discord.Interaction, event, eph_resp: bool = False):
@@ -220,7 +224,7 @@ class SubmitAllButton(Button):
         await interaction.response.defer()
 
         view: PaginatedHourSelectionView = self.view
-        changed = False
+        changed_slots = set()  # Track which slots actually changed
 
         selected = view.selected_utc_keys.copy()
         selected_utc_iso_strs = [iso_str for iso_str, _, _ in selected]
@@ -229,13 +233,13 @@ class SubmitAllButton(Button):
             if view.user_id not in user_list.values():
                 next_position = str(len(user_list) + 1)
                 view.event.availability[utc_iso_str][next_position] = view.user_id
-                changed = True
+                changed_slots.add(utc_iso_str)
 
         for utc_iso_str, user_dict in view.event.availability.items():
             if utc_iso_str not in selected_utc_iso_strs and view.user_id in user_dict.values():
                 updated_queue = events.remove_user_from_queue(user_dict, view.user_id)
                 view.event.availability[utc_iso_str] = updated_queue
-                changed = True
+                changed_slots.add(utc_iso_str)
 
         # Update RSVP list safely
         has_availability = events.user_has_any_availability(view.user_id, view.event.availability)
@@ -243,19 +247,17 @@ class SubmitAllButton(Button):
 
         if has_availability and not user_in_rsvp:
             view.event.rsvp.append(view.user_id)
-            changed = True
         elif not has_availability and user_in_rsvp:
             view.event.rsvp.remove(view.user_id)
-            changed = True
 
         # Always save and provide feedback
         event_data = view.event
 
-        if changed:
+        if changed_slots:
             log_event_action("register", event_data.guild_id, event_data.event_name, user_id=view.user_id)
             events.modify_event(event_data)
 
-            # Try to update bulletin if it exists (non-blocking)
+            # Try to update only affected bulletin messages (non-blocking)
             try:
                 event_msg_directory = bulletins.get_event_bulletin(guild_id=event_data.guild_id)
                 if event_data.bulletin_message_id and event_msg_directory.get(f"{event_data.bulletin_message_id}"):
@@ -263,7 +265,15 @@ class SubmitAllButton(Button):
                     thread = interaction.client.get_channel(int(event_bulletin_msg.thread_id))
 
                     if thread:
-                        for msg_id in event_bulletin_msg.thread_messages:
+                        # Find which message IDs contain the changed slots
+                        affected_msg_ids = set()
+                        for slot in changed_slots:
+                            slot_info = event_data.availability_to_message_map.get(slot)
+                            if slot_info:
+                                affected_msg_ids.add(slot_info["message_id"])
+
+                        # Only update affected messages
+                        for msg_id in affected_msg_ids:
                             try:
                                 message = await thread.fetch_message(int(msg_id))
                                 new_embed = bulletins.generate_single_embed_for_message(event_data, str(message.id))

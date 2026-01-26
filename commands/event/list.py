@@ -200,8 +200,8 @@ class RegisterButton(Button):
         self.event_name = event.event_name
         button_label = "Edit Registration" if is_selected else "Register"
         button_style = discord.ButtonStyle.danger if is_selected else discord.ButtonStyle.primary
-        custom_id = f"register:{self.event_name}"
-        super().__init__(label=button_label, style=button_style, custom_id=custom_id)
+        # Use unique prefix to avoid conflict with global bulletin handler
+        super().__init__(label=button_label, style=button_style)
 
     async def callback(self, interaction: discord.Interaction):
         await register.schedule_command(interaction, self.event_name)
