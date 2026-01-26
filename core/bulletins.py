@@ -462,18 +462,14 @@ async def handle_slot_selection(interaction: discord.Interaction, selected_slot:
         # Register user
         next_position = str(len(slot_availability) + 1)
         event.availability[selected_slot][next_position] = user_id
-        # Add to RSVP if not already there
         if user_id not in event.rsvp:
             event.rsvp.append(user_id)
-        action = "✅ Registered"
     else:
         # Unregister user
         updated_queue = events.remove_user_from_queue(slot_availability, user_id)
         event.availability[selected_slot] = updated_queue
-        # Remove from RSVP if no longer has any availability
         if not events.user_has_any_availability(user_id, event.availability) and user_id in event.rsvp:
             event.rsvp.remove(user_id)
-        action = "❌ Unregistered"
 
     events.modify_event(event)
 
@@ -499,9 +495,6 @@ async def handle_slot_selection(interaction: discord.Interaction, selected_slot:
 
     # Update main bulletin head message
     await update_bulletin_header(interaction.client, event)
-
-    # Send confirmation to user
-    await interaction.followup.send(f"{action} for this time slot.", ephemeral=True)
 
 # ========== Bulletin View ==========
 
