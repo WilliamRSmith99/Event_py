@@ -1,10 +1,9 @@
 from dataclasses import dataclass, field
 from typing import Dict, Any, Union
 from core.storage import read_json, write_json_atomic
-from core import events, utils, conf
-from core.logging import get_logger, log_event_action
+from core import events, conf
+from core.logging import get_logger
 from datetime import datetime, timedelta
-from commands.event import register
 import discord
 from discord.ui import Button, View
 
@@ -447,102 +446,93 @@ async def delete_bulletin_message(client: discord.Client, event_data: events.Eve
     
 
 async def handle_slot_selection(interaction: discord.Interaction, selected_slot: str, event_name: str):
-    user_id = str(interaction.user.id)
-    user_display = interaction.user.display_name
+    """Handle slot selection from thread buttons. Called after interaction is deferred."""
+    user_id = interaction.user.id
 
     # Load events and find event
-    event_data = events.get_events(interaction.guild.id,event_name)
+    event_data = events.get_events(interaction.guild.id, event_name)
     if not event_data:
-        return await interaction.response.send_message("Event not found.", ephemeral=True)
+        return await interaction.followup.send("Event not found.", ephemeral=True)
 
     # Register or unregister user
-    slot_availability = event_data[event_name].availability.setdefault(selected_slot, {})
+    event = event_data[event_name]
+    slot_availability = event.availability.setdefault(selected_slot, {})
+
     if user_id not in slot_availability.values():
+        # Register user
         next_position = str(len(slot_availability) + 1)
-        event_data[event_name].availability[selected_slot][next_position] = user_id
+        event.availability[selected_slot][next_position] = user_id
+        # Add to RSVP if not already there
+        if user_id not in event.rsvp:
+            event.rsvp.append(user_id)
         action = "✅ Registered"
     else:
+        # Unregister user
         updated_queue = events.remove_user_from_queue(slot_availability, user_id)
-        event_data[event_name].availability[selected_slot] = updated_queue
+        event.availability[selected_slot] = updated_queue
+        # Remove from RSVP if no longer has any availability
+        if not events.user_has_any_availability(user_id, event.availability) and user_id in event.rsvp:
+            event.rsvp.remove(user_id)
         action = "❌ Unregistered"
 
-    events.modify_event(event_data[event_name])
+    events.modify_event(event)
 
 
     # Get message info for this slot
-    slot_msg_info = event_data[event_name].availability_to_message_map.get(selected_slot)
+    slot_msg_info = event.availability_to_message_map.get(selected_slot)
     if not slot_msg_info:
-        return await interaction.response.send_message("Failed to locate slot message.", ephemeral=True)
+        return await interaction.followup.send("Failed to locate slot message.", ephemeral=True)
 
     thread = interaction.client.get_channel(int(slot_msg_info["thread_id"]))
     message = await thread.fetch_message(int(slot_msg_info["message_id"]))
 
     # Rebuild embed
-    new_embed = generate_single_embed_for_message(event_data[event_name], str(message.id))
+    new_embed = generate_single_embed_for_message(event, str(message.id))
     if new_embed:
         # Rebuild the view (button rows) for this embed
-        view = ThreadView(event_data[event_name].event_name, [
+        view = ThreadView(event.event_name, [
             (info["embed_index"], slot)
-            for slot, info in event_data[event_name].availability_to_message_map.items()
+            for slot, info in event.availability_to_message_map.items()
             if info["message_id"] == str(message.id)
         ])
         await message.edit(embed=new_embed, view=view)
 
     # Update main bulletin head message
-    await update_bulletin_header(interaction.client, event_data[event_name])
+    await update_bulletin_header(interaction.client, event)
 
-    # Save updated events
-    events.modify_event(event_data[event_name])
+    # Send confirmation to user
+    await interaction.followup.send(f"{action} for this time slot.", ephemeral=True)
 
 # ========== Bulletin View ==========
 
 class RegisterButton(Button):
+    """Register button for bulletin. Callback handled by on_interaction in bot.py."""
     def __init__(self, event_name):
         self.event_name = event_name
-        button_label = "Register"
-        button_style = discord.ButtonStyle.primary
-        custom_id = f"register:{self.event_name}"
-        super().__init__(label=button_label, style=button_style, custom_id=custom_id)
+        # Use | delimiter to avoid issues with colons in event names
+        custom_id = f"register|{self.event_name}"
+        super().__init__(label="Register", style=discord.ButtonStyle.primary, custom_id=custom_id)
 
-    async def callback(self, interaction: discord.Interaction):
-        await register.schedule_command(interaction, self.event_name, eph_resp=True)
 
 class NotifyMeButton(Button):
+    """Notify Me button for bulletin. Callback handled by on_interaction in bot.py."""
     def __init__(self, event_name):
         self.event_name = event_name
-        button_label = "Notify Me"
-        button_style = discord.ButtonStyle.secondary
-        custom_id = f"notify:{self.event_name}"
-        super().__init__(label=button_label, style=button_style, custom_id=custom_id)
+        # Use | delimiter to avoid issues with colons in event names
+        custom_id = f"notify|{self.event_name}"
+        super().__init__(label="Notify Me", style=discord.ButtonStyle.secondary, custom_id=custom_id)
 
-    async def callback(self, interaction: discord.Interaction):
-        from commands.user import notifications as notif_commands
-        await notif_commands.show_notification_settings(interaction, self.event_name)
 
 class RegisterSlotButton(Button):
+    """Slot registration button for threads. Callback handled by on_interaction in bot.py."""
     def __init__(self, event_name, slot_time: str, emoji_index: str):
-
         self.event_name = event_name
         self.slot_time = slot_time
         self.emoji_index = emoji_index
         self.emoji_icon = EMOJIS_MAP.get(str(emoji_index), "⚠️ 404")
-        button_label = f"{self.emoji_icon}"
-        button_style = discord.ButtonStyle.primary
-        custom_id = f"register:{self.event_name}:{slot_time}"
-        super().__init__(label=button_label, style=button_style, custom_id=custom_id)
-
-    async def callback(self, interaction: discord.Interaction):
-        # Access event + slot info
-        event_name, slot_time = self.event_name, self.slot_time
-
-        await interaction.response.defer(ephemeral=True)
-
-        # Register the user for this slot
-        await handle_slot_selection(
-            interaction=interaction,
-            event_name=event_name,
-            selected_slot=slot_time
-        )
+        # Use | delimiter to avoid issues with colons in event names and ISO timestamps
+        custom_id = f"register|{self.event_name}|{slot_time}"
+        super().__init__(label=self.emoji_icon, style=discord.ButtonStyle.primary, custom_id=custom_id)
 
 class BulletinView(View):
     def __init__(self, event_name, show_register: bool = True):
@@ -557,8 +547,7 @@ class ThreadView(View):
     def __init__(self, event_name, slots: list[tuple[str, str]]):
         """
         :param event_name: Event identifier
-        :param slots: List of (emoji, slot_time) tuples
-        :param selected_slot: Optional string of current selected slot   custom_id=f"{event_name}:thread:{slots[0][1]}"
+        :param slots: List of (emoji_index, slot_time) tuples
         """
         self.event_name = event_name
         super().__init__(timeout=None)

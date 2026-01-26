@@ -110,12 +110,3 @@ async def _prompt_event_deletion(interaction, guild_id, event_name, event_detail
     )
 
     return True
-
-# ==========================
-#        Edit Event
-# ==========================
-
-
-# ==========================
-#       Confirm Event
-# ==========================

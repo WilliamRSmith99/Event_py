@@ -226,11 +226,6 @@ class OverlapSummaryView(View):
             user_timezone=self.user_timezone,
             disabled=self.date_page >= total_date_pages - 1
         ))
-        # # Nav buttons
-        # self.add_item(NavButton(self, "⬅️ Prev Date", "prev_date", self.event, row=nav_row, user_timezone=self.user_timezone, disabled=self.date_page == 0))
-        # self.add_item(NavButton(self, "⬅️ Earlier Times", "earlier", self.event, row=nav_row, user_timezone=self.user_timezone, disabled=self.time_page == 0))
-        # self.add_item(NavButton(self, "Later Times ➡️", "later", self.event, row=nav_row, user_timezone=self.user_timezone, disabled=self.time_page >= total_time_pages - 1))
-        # self.add_item(NavButton(self, "Next Date ➡️", "next_date", self.event, row=nav_row, user_timezone=self.user_timezone, disabled=self.date_page >= ((len(self.date_slots) - 1) // MAX_DATES_PER_PAGE)))
 
 class AttendeeView(View):
     def __init__(self, original_view: OverlapSummaryView, utc_iso: str):

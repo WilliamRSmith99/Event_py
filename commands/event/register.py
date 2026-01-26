@@ -77,7 +77,7 @@ async def schedule_command(interaction: discord.Interaction, event_name: str, ep
     # Get user's effective time format preference
     use_24hr = userdata.get_effective_time_format(interaction.user.id, interaction.guild_id)
 
-    view = PaginatedHourSelectionView(event, local_slots_by_date, str(interaction.user.id), use_24hr=use_24hr)
+    view = PaginatedHourSelectionView(event, local_slots_by_date, interaction.user.id, use_24hr=use_24hr)
 
     try:
         if interaction.type.name == "component" and not eph_resp:
@@ -90,7 +90,7 @@ async def schedule_command(interaction: discord.Interaction, event_name: str, ep
 
 async def _toggle_single_slot_registration(interaction: discord.Interaction, event, eph_resp: bool = False):
     """Toggle registration for a confirmed event with a single time slot."""
-    user_id = str(interaction.user.id)
+    user_id = interaction.user.id
     confirmed_slot = event.confirmed_date
 
     # Check if user is currently registered for this slot
@@ -118,7 +118,7 @@ async def _toggle_single_slot_registration(interaction: discord.Interaction, eve
 
     # Save changes
     events.modify_event(event)
-    log_event_action("register", event.guild_id, event.event_name, user_id=int(user_id))
+    log_event_action("register", event.guild_id, event.event_name, user_id=user_id)
 
     # Update bulletin if exists
     try:
@@ -216,6 +216,9 @@ class SubmitAllButton(Button):
         super().__init__(label="✅ Submit Times", style=ButtonStyle.primary, row=4)
 
     async def callback(self, interaction):
+        # Defer immediately to prevent interaction timeout during long operations
+        await interaction.response.defer()
+
         view: PaginatedHourSelectionView = self.view
         changed = False
 
@@ -224,10 +227,10 @@ class SubmitAllButton(Button):
         for utc_iso_str in selected_utc_iso_strs:
             user_list = view.event.availability.get(utc_iso_str, {})
             if view.user_id not in user_list.values():
-                next_position = str(len(user_list) + 1) 
+                next_position = str(len(user_list) + 1)
                 view.event.availability[utc_iso_str][next_position] = view.user_id
                 changed = True
-         
+
         for utc_iso_str, user_dict in view.event.availability.items():
             if utc_iso_str not in selected_utc_iso_strs and view.user_id in user_dict.values():
                 updated_queue = events.remove_user_from_queue(user_dict, view.user_id)
@@ -249,7 +252,7 @@ class SubmitAllButton(Button):
         event_data = view.event
 
         if changed:
-            log_event_action("register", event_data.guild_id, event_data.event_name, user_id=int(view.user_id))
+            log_event_action("register", event_data.guild_id, event_data.event_name, user_id=view.user_id)
             events.modify_event(event_data)
 
             # Try to update bulletin if it exists (non-blocking)
@@ -279,7 +282,7 @@ class SubmitAllButton(Button):
             except Exception as e:
                 logger.warning(f"Failed to update bulletin: {e}")
 
-        await interaction.response.edit_message(
+        await interaction.edit_original_response(
             content=f"✅ Availability updated for **{event_data.event_name}**.",
             view=None
         )

@@ -56,16 +56,16 @@ class EventState:
     guild_id: str
     event_name: str
     max_attendees: str
-    organizer: str
+    organizer: int  # Discord user ID
     organizer_cname: str
     confirmed_date: str
     event_id: Optional[str] = field(default_factory=lambda: str(uuid.uuid4()))
     bulletin_channel_id: Optional[int] = None
     bulletin_message_id: Optional[int] = None
     bulletin_thread_id: Optional[int] = None
-    rsvp: list[str] = field(default_factory=list)
+    rsvp: List[int] = field(default_factory=list)  # List of Discord user IDs
     slots: list[str] = field(default_factory=list)
-    availability: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    availability: Dict[str, Dict[str, int]] = field(default_factory=dict)  # {slot: {position: user_id}}
     waitlist: Dict[str, Dict[str, str]] = field(default_factory=dict)
     availability_to_message_map: Dict[str, Dict[str, Union[int, str]]] = field(default_factory=dict)
     # Format: { utc_iso: { "thread_id": int, "message_id": int, "embed_index": int, "field_name": str } }
@@ -108,20 +108,38 @@ class EventState:
         if "recurrence" in data and data["recurrence"]:
             recurrence = RecurrenceConfig.from_dict(data["recurrence"])
 
+        # Convert organizer to int (backwards compatibility with string storage)
+        organizer = data["organizer"]
+        if isinstance(organizer, str):
+            organizer = int(organizer)
+
+        # Convert rsvp list to ints
+        rsvp_raw = data.get("rsvp", [])
+        rsvp = [int(uid) if isinstance(uid, str) else uid for uid in rsvp_raw]
+
+        # Convert availability user IDs to ints
+        availability_raw = data.get("availability", {})
+        availability = {}
+        for slot, users in availability_raw.items():
+            availability[slot] = {
+                pos: (int(uid) if isinstance(uid, str) else uid)
+                for pos, uid in users.items()
+            }
+
         return EventState(
             guild_id=data["guild_id"],
             event_name=data["event_name"],
             event_id=data.get("event_id", str(uuid.uuid4())),
             max_attendees=data["max_attendees"],
-            organizer=data["organizer"],
+            organizer=organizer,
             organizer_cname=data["organizer_cname"],
             confirmed_date=data["confirmed_date"],
             bulletin_channel_id=data.get("bulletin_channel_id"),
             bulletin_message_id=data.get("bulletin_message_id"),
             bulletin_thread_id=data.get("bulletin_thread_id"),
-            rsvp=data.get("rsvp", []),
+            rsvp=rsvp,
             slots=data.get("slots", []),
-            availability=data.get("availability", {}),
+            availability=availability,
             waitlist=data.get("waitlist", {}),
             availability_to_message_map=data.get("availability_to_message_map", {}),
             recurrence=recurrence,
@@ -220,19 +238,24 @@ def modify_event(event_state: Union[EventState, dict]) -> None:
     guild_id = str(event_state.guild_id if isinstance(event_state, EventState) else event_state.get("guild_id"))
     event_name = event_state.event_name if isinstance(event_state, EventState) else event_state.get("event_name")
 
-    if guild_id not in events_list:
-        events_list[guild_id] = {"events": {}}
+    # Always reload from disk to avoid race conditions
+    current_events = load_events()
+
+    if guild_id not in current_events:
+        current_events[guild_id] = {"events": {}}
 
     if isinstance(event_state, dict):
         event_state = EventState.from_dict(event_state)
 
-    events_list[guild_id]["events"][event_name] = event_state
-    save_events(events_list)
+    current_events[guild_id]["events"][event_name] = event_state
+    save_events(current_events)
 
 def delete_event(guild_id: str, event_name: str) -> bool:
+    # Always reload from disk to avoid race conditions
+    current_events = load_events()
     try:
-        del events_list[str(guild_id)]["events"][event_name]
-        save_events(events_list)
+        del current_events[str(guild_id)]["events"][event_name]
+        save_events(current_events)
         log_event_action("delete", guild_id, event_name)
         return True
     except KeyError as e:
@@ -254,9 +277,10 @@ def rename_event(guild_id: int, old_name: str, new_name: str) -> Optional[EventS
         or the new name already exists.
     """
     guild_id_str = str(guild_id)
-    # Not using load_events() here to operate on the global events_list
-    
-    guild_events = events_list.get(guild_id_str, {}).get("events", {})
+    # Always reload from disk to avoid race conditions
+    current_events = load_events()
+
+    guild_events = current_events.get(guild_id_str, {}).get("events", {})
 
     # Check if new name already exists
     if new_name.lower() in [name.lower() for name in guild_events.keys()] and new_name.lower() != old_name.lower():
@@ -279,20 +303,22 @@ def rename_event(guild_id: int, old_name: str, new_name: str) -> Optional[EventS
     # Update name and put it back
     event_to_rename.event_name = new_name
     guild_events[new_name] = event_to_rename
-    
-    events_list[guild_id_str]["events"] = guild_events
-    save_events(events_list)
+
+    current_events[guild_id_str]["events"] = guild_events
+    save_events(current_events)
     log_event_action("rename", guild_id_str, old_name, new_name=new_name)
-    
+
     return event_to_rename
 
 
-def remove_user_from_queue(queue: dict, user_id: str) -> dict:
+def remove_user_from_queue(queue: dict, user_id: int) -> dict:
+    """Remove a user from a queue and reorder positions."""
     return {str(i + 1): v for i, (k, v) in enumerate(
         (item for item in sorted(queue.items(), key=lambda x: int(x[0])) if item[1] != user_id)
     )}
 
-def user_has_any_availability(user_id: str, availability: dict) -> bool:
+def user_has_any_availability(user_id: int, availability: dict) -> bool:
+    """Check if a user has any availability in any slot."""
     for queue in availability.values():
         if user_id in queue.values():
             return True

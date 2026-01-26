@@ -131,7 +131,7 @@ async def format_single_event(interaction, event, is_edit=False, inherit_view=No
     if inherit_view:
         view = inherit_view
     else:
-        view = EventView(event, user_tz, is_selected=(str(interaction.user.id) in event.rsvp))
+        view = EventView(event, user_tz, is_selected=(interaction.user.id in event.rsvp))
 
     if event.confirmed_date and event.confirmed_date != "TBD":
         view.add_item(NotificationButton(event))
@@ -177,7 +177,7 @@ async def event_info(interaction: discord.Interaction, event_name: str = None):
             if event_name.lower() in [e.lower() for e in archived.keys()]:
                 message += "\n\n*This event has ended.*"
         else:
-            message = "📅 No upcoming events.\n\n\n 🤫 *psst*: create new events with `/newevent`"
+            message = "📅 No upcoming events.\n\n\n 🤫 *psst*: create new events with `/create`"
             if archived:
                 message += f"\n\n*({len(archived)} past events in history)*"
 
@@ -187,18 +187,9 @@ async def event_info(interaction: discord.Interaction, event_name: str = None):
     # Send events using followup
     for event in events_found.values():
         try:
-            # We use is_edit=True because we are editing the deferred "thinking" response
-            # for the first event, and then sending followups.
-            # A cleaner way is to build all messages and send once, but this is a quick fix.
-            # Let's check if a response has been sent for this interaction.
-            if not interaction.is_expired() and not interaction.response.is_done():
-                 await format_single_event(interaction, event, is_edit=False) # First one sends, subsequent are followups
-            else:
-                 await format_single_event(interaction, event, is_edit=False)
-
+            await format_single_event(interaction, event, is_edit=False)
         except Exception as e:
             logger.error(f"Error formatting event {event.event_name}: {e}", exc_info=e)
-            # Continue with next event even if one fails
             continue
 
 # --- Custom Button Implementations ---
@@ -305,7 +296,7 @@ class ManageEventView(utils.ExpiringView):
             await interaction.response.send_message("❌ You don't have permission to view this event.", ephemeral=True)
             return
 
-        is_selected = str(interaction.user.id) in self.event.rsvp
+        is_selected = interaction.user.id in self.event.rsvp
         view = EventView(self.event, self.user_tz, is_selected=is_selected)
 
         if self.event.confirmed_date and self.event.confirmed_date != "TBD":
@@ -402,7 +393,7 @@ class EditEventView(utils.ExpiringView):
 
     async def _add_slots_callback(self, interaction: discord.Interaction):
         await interaction.response.send_message(
-            "📅 Adding time slots is not yet implemented. Use `/newevent` to create a new event with different slots.",
+            "📅 Adding time slots is not yet implemented. Use `/create` to create a new event with different slots.",
             ephemeral=True
         )
 
@@ -662,7 +653,7 @@ class ConfirmDateView(utils.ExpiringView):
         await interaction.response.edit_message(view=self)
 
     async def _cancel(self, interaction: discord.Interaction):
-        is_selected = str(interaction.user.id) in self.event.rsvp
+        is_selected = interaction.user.id in self.event.rsvp
         view = EventView(self.event, self.user_tz, is_selected=is_selected)
 
         if self.event.confirmed_date and self.event.confirmed_date != "TBD":
@@ -761,7 +752,7 @@ class ConfirmDateView(utils.ExpiringView):
             pass
 
         # Return to event view
-        is_selected = str(interaction.user.id) in self.event.rsvp
+        is_selected = interaction.user.id in self.event.rsvp
         view = EventView(self.event, self.user_tz, is_selected=is_selected)
         view.add_item(NotificationButton(self.event))
 

@@ -1,15 +1,15 @@
 import discord
 from discord import app_commands
-from typing import Optional, Literal
+from typing import Optional
 import sys
 import asyncio
 
 import config
 from commands.configs import settings
-from commands.event import manage, register, responses, create, list as event_list
-from commands.user import timezone, notifications as notif_commands, settings as user_settings
+from commands.event import register, create, list as event_list
+from commands.user import notifications as notif_commands, settings as user_settings
 from commands.admin import premium
-from core import auth, utils, events, userdata, bulletins, notifications, logging as bot_logging
+from core import bulletins, notifications, logging as bot_logging
 from core.database import init_database
 from core.stripe_integration import is_stripe_configured
 
@@ -97,31 +97,56 @@ async def on_interaction(interaction: discord.Interaction):
     if interaction.type != discord.InteractionType.component:
         return
 
+    # Skip if interaction was already responded to (prevents double-handling)
+    if interaction.response.is_done():
+        return
+
     custom_id = interaction.data.get("custom_id", "")
 
-    # Handle bulletin register button: register:{event_name}
-    if custom_id.startswith("register:"):
-        parts = custom_id.split(":")
-        if len(parts) == 2:
-            # Main register button: register:{event_name}
-            event_name = parts[1]
-            await register.schedule_command(interaction, event_name, eph_resp=True)
-            return
-        elif len(parts) == 3:
-            # Thread slot button: register:{event_name}:{slot_time}
-            event_name = parts[1]
-            slot_time = parts[2]
-            await interaction.response.defer(ephemeral=True)
-            await bulletins.handle_slot_selection(interaction, slot_time, event_name)
-            return
+    try:
+        # Handle bulletin register button
+        # Format: register|{event_name} or register|{event_name}|{slot_time}
+        # Legacy format: register:{event_name} or register:{event_name}:{slot_time}
+        if custom_id.startswith("register|") or custom_id.startswith("register:"):
+            delimiter = "|" if "|" in custom_id else ":"
+            parts = custom_id.split(delimiter)
 
-    # Handle notify button: notify:{event_name}
-    if custom_id.startswith("notify:"):
-        parts = custom_id.split(":")
-        if len(parts) >= 2:
-            event_name = parts[1]
-            await notif_commands.show_notification_settings(interaction, event_name)
-            return
+            if len(parts) == 2:
+                # Main register button: register|{event_name}
+                event_name = parts[1]
+                await register.schedule_command(interaction, event_name, eph_resp=True)
+                return
+            elif len(parts) >= 3:
+                # Thread slot button: register|{event_name}|{slot_time}
+                # Slot time may contain colons (ISO format), so rejoin everything after event_name
+                event_name = parts[1]
+                slot_time = delimiter.join(parts[2:])
+                await interaction.response.defer(ephemeral=True)
+                await bulletins.handle_slot_selection(interaction, slot_time, event_name)
+                return
+
+        # Handle notify button
+        # Format: notify|{event_name} or notify:{event_name}
+        if custom_id.startswith("notify|") or custom_id.startswith("notify:"):
+            delimiter = "|" if "|" in custom_id else ":"
+            # Event name might contain colons, so only split on first delimiter
+            parts = custom_id.split(delimiter, 1)
+            if len(parts) >= 2:
+                event_name = parts[1]
+                await notif_commands.show_notification_settings(interaction, event_name)
+                return
+
+    except Exception as e:
+        logger.error(f"Error handling interaction {custom_id}: {e}", exc_info=True)
+        # Try to respond with error if we haven't already
+        if not interaction.response.is_done():
+            try:
+                await interaction.response.send_message(
+                    "❌ An error occurred. Please try again.",
+                    ephemeral=True
+                )
+            except Exception:
+                pass
 
 
 @client.event
