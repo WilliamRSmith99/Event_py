@@ -6,7 +6,7 @@ import asyncio
 
 import config
 from commands.configs import settings
-from commands.event import register, create, list as event_list, export as event_export
+from commands.event import register, create, list as event_list, export as event_export, recurrence as event_recurrence
 from commands.user import notifications as notif_commands, settings as user_settings
 from commands.admin import premium
 from core import bulletins, notifications, logging as bot_logging
@@ -68,6 +68,17 @@ async def events_command(interaction: discord.Interaction, filter: Optional[str]
 async def export_command(interaction: discord.Interaction, event_name: str):
     await event_export.export_event(interaction, event_name)
 
+@tree.command(name="recurrence", description="Set a recurring schedule for an event (Premium)", guild=guild)
+@app_commands.describe(event_name="Name of the event", recurrence_type="How often to repeat")
+@app_commands.choices(recurrence_type=[
+    app_commands.Choice(name="None (disable)", value="none"),
+    app_commands.Choice(name="Weekly", value="weekly"),
+    app_commands.Choice(name="Every 2 weeks", value="biweekly"),
+    app_commands.Choice(name="Monthly", value="monthly"),
+])
+async def recurrence_command(interaction: discord.Interaction, event_name: str, recurrence_type: str):
+    await event_recurrence.set_recurrence(interaction, event_name, recurrence_type)
+
 # ============================================================
 #                        USER COMMANDS
 # ============================================================
@@ -99,6 +110,28 @@ async def subscription(interaction: discord.Interaction):
 # ============================================================
 #                        BOT EVENTS
 # ============================================================
+
+async def recurring_event_task():
+    """Background task: generates missing recurring event instances every 15 minutes."""
+    await client.wait_until_ready()
+    while not client.is_closed():
+        try:
+            from core.repositories.events import EventRepository
+            from core import events as core_events
+            all_events = EventRepository.get_all_events()
+            total_created = 0
+            for guild_events in all_events.values():
+                for event in guild_events.values():
+                    if event.is_recurring and (
+                        not event.recurrence or not event.recurrence.parent_event_id
+                    ):
+                        total_created += core_events.generate_recurring_instances(event)
+            if total_created:
+                logger.info(f"Recurring task: created {total_created} new instance(s)")
+        except Exception as e:
+            logger.error(f"Error in recurring event task: {e}", exc_info=True)
+        await asyncio.sleep(15 * 60)
+
 
 @client.event
 async def on_interaction(interaction: discord.Interaction):
@@ -187,6 +220,9 @@ async def on_ready():
 
     # Start notification scheduler
     notifications.init_scheduler(client)
+
+    # Start recurring event instance generator
+    asyncio.create_task(recurring_event_task())
 
     # Start web server for Stripe webhooks (if configured)
     if is_stripe_configured():

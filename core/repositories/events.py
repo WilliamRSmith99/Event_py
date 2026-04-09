@@ -150,6 +150,15 @@ class EventRepository:
         return result
 
     @staticmethod
+    def get_events_by_parent(guild_id: int, parent_event_id: str) -> List["EventState"]:
+        """Get all child instances of a recurring parent event."""
+        rows = execute_query(
+            "SELECT * FROM events WHERE guild_id = ? AND parent_event_id = ?",
+            (str(guild_id), parent_event_id)
+        )
+        return [EventRepository._row_to_event_state(dict(row), guild_id) for row in rows]
+
+    @staticmethod
     def count_events(guild_id: int) -> int:
         """Count the number of events for a guild."""
         row = execute_one(
