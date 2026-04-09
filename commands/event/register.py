@@ -197,6 +197,28 @@ class PaginatedHourSelectionView(View):
             self.date_objs.append(date_label)
             self.slots_by_date.append(processed_slots)
 
+        # Pre-select slots that match the user's historical availability (Premium guilds only)
+        try:
+            from core.availability_memory import get_suggested_availability
+            from core.entitlements import has_feature, Feature
+            if has_feature(int(event.guild_id), Feature.PERSISTENT_AVAILABILITY):
+                all_local_dts = []
+                dt_to_key: dict = {}
+                for date_slots in self.slots_by_date:
+                    for utc_iso_str, local_dt, date_key, hour_key, _ in date_slots:
+                        key = (utc_iso_str, date_key, hour_key)
+                        if key not in self.selected_utc_keys:
+                            all_local_dts.append(local_dt)
+                            dt_to_key[id(local_dt)] = (local_dt, key)
+
+                suggested = get_suggested_availability(user_id, int(event.guild_id), all_local_dts)
+                for sdt in suggested:
+                    entry = dt_to_key.get(id(sdt))
+                    if entry:
+                        self.selected_utc_keys.add(entry[1])
+        except Exception as e:
+            logger.warning(f"Could not load availability memory: {e}")
+
         self.render_buttons()
 
     def render_date_label(self):
@@ -295,6 +317,24 @@ class SubmitAllButton(Button):
         if changed_slots:
             log_event_action("register", event_data.guild_id, event_data.event_name, user_id=view.user_id)
             events.modify_event(event_data)
+
+            # Record user's availability patterns for future pre-selection (Premium guilds only)
+            try:
+                from core.availability_memory import record_availability
+                from core.entitlements import has_feature, Feature
+                if has_feature(int(event_data.guild_id), Feature.PERSISTENT_AVAILABILITY) and selected_utc_iso_strs:
+                    utc_to_local = {
+                        utc_iso: local_dt
+                        for date_slots in view.slots_by_date
+                        for (utc_iso, local_dt, _, _, _) in date_slots
+                    }
+                    selected_local_dts = [
+                        utc_to_local[u] for u in selected_utc_iso_strs if u in utc_to_local
+                    ]
+                    if selected_local_dts:
+                        record_availability(view.user_id, int(event_data.guild_id), selected_local_dts)
+            except Exception as e:
+                logger.warning(f"Could not record availability memory: {e}")
 
             # Notify anyone promoted off the implicit waitlist
             for slot_utc, old_q, new_q in slots_to_promote:
