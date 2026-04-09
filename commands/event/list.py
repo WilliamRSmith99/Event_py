@@ -162,8 +162,8 @@ async def event_info(interaction: discord.Interaction, event_name: str = None):
                 "❌ An error occurred while loading events. Please try again.",
                 ephemeral=True
             )
-        except:
-            pass
+        except Exception:
+            logger.warning("Could not send error response to interaction after defer failure")
         return
 
     # Use get_active_events to exclude archived/past events
@@ -541,8 +541,8 @@ class EditEventAttendeesModal(discord.ui.Modal, title="Edit Max Attendees"):
         try:
             from core import bulletins
             await bulletins.update_bulletin_header(interaction.client, self.event)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Failed to update bulletin after attendee edit: {e}")
 
         display = self.event.max_attendees or "unlimited"
         await interaction.response.send_message(
@@ -735,8 +735,7 @@ class ConfirmDateView(utils.ExpiringView):
             from core import bulletins
             await bulletins.update_bulletin_header(interaction.client, self.event)
         except Exception as e:
-            # Don't fail the confirmation if bulletin update fails
-            pass
+            logger.warning(f"Failed to update bulletin after event confirmation: {e}")
 
         # Send confirmation notifications to users who have notification preferences
         try:
@@ -748,8 +747,7 @@ class ConfirmDateView(utils.ExpiringView):
                 confirmed_time
             )
         except Exception as e:
-            # Don't fail the confirmation if notifications fail
-            pass
+            logger.warning(f"Failed to send confirmation notifications: {e}")
 
         # Return to event view
         is_selected = interaction.user.id in self.event.rsvp

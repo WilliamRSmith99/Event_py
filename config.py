@@ -49,7 +49,7 @@ LOG_FORMAT = os.getenv(
 # =============================================================================
 
 # Free tier limits
-FREE_TIER_MAX_EVENTS = int(os.getenv("FREE_TIER_MAX_EVENTS", "2"))
+FREE_TIER_MAX_EVENTS = int(os.getenv("FREE_TIER_MAX_EVENTS", "5"))
 
 # Premium tier limits
 PREMIUM_TIER_MAX_EVENTS = int(os.getenv("PREMIUM_TIER_MAX_EVENTS", "999"))  # effectively unlimited

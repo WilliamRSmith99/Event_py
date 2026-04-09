@@ -2,6 +2,9 @@ import discord
 from discord.ext import commands
 from discord.ui import View, Button, RoleSelect, Select
 from core import conf
+from core.logging import get_logger
+
+logger = get_logger(__name__)
 
 settings_schema = {
     0: ["Roles and Permissions", '\n`Manage who can configure the bot, create events, or RSVP.`\n    • Admin Roles — Can configure bot settings and manage all events.\n   • Event Organizer Roles — Can create and manage their own events.\n   • Event Attendee Roles — Can RSVP to events and receive reminders'],
@@ -213,8 +216,8 @@ class SubmitButton(Button):
                     view=None
                 )
                 return
-        except Exception:
-            pass  # Don't fail settings save if bulletin update fails
+        except Exception as e:
+            logger.warning(f"Failed to update bulletin after settings save: {e}")
 
         await interaction.response.edit_message(content="✅ Settings saved successfully!", view=None)
 

@@ -502,23 +502,23 @@ class NotificationScheduler:
         now_aware = datetime.now(timezone.utc)
         all_events = {}
 
+        # Load all events from SQLite across all guilds
+        from core.repositories.events import EventRepository
+        all_events_by_guild = EventRepository.get_all_events()
+
         # Archive past events and update their bulletins (runs every check)
-        events_data = events.load_events()
-        for guild_id_str in events_data.keys():
+        for guild_id_str, guild_events in all_events_by_guild.items():
             guild_id = int(guild_id_str)
-            past_events = events.get_past_events(guild_id)
+            for event in guild_events.values():
+                if event.is_past and not event.is_archived:
+                    await bulletins.mark_bulletin_as_past(self.client, event)
+                    events.archive_event(guild_id_str, event.event_name)
 
-            for event in past_events:
-                # Update bulletin to show event ended
-                await bulletins.mark_bulletin_as_past(self.client, event)
-                # Archive the event
-                events.archive_event(guild_id_str, event.event_name)
-
-        # Load all events from all guilds
-        events_data = events.load_events()
-        for guild_id, guild_data in events_data.items():
-            for event_name, event in guild_data.get("events", {}).items():
-                all_events[f"{guild_id}:{event_name}"] = event
+        # Re-load all events for notification checks (archive_event may have mutated state)
+        all_events_by_guild = EventRepository.get_all_events()
+        for guild_id_str, guild_events in all_events_by_guild.items():
+            for event_name, event in guild_events.items():
+                all_events[f"{guild_id_str}:{event_name}"] = event
 
         # Check each event for notifications to send
         for key, event in all_events.items():

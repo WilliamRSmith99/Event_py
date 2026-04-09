@@ -178,9 +178,10 @@ class EventRepository:
                         event_id, guild_id, event_name, max_attendees,
                         organizer, organizer_cname, confirmed_date,
                         bulletin_channel_id, bulletin_message_id, bulletin_thread_id,
+                        archived_at,
                         recurrence_type, recurrence_interval, recurrence_end_date,
                         recurrence_occurrences, parent_event_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         event.event_id or str(uuid.uuid4()),
@@ -193,6 +194,7 @@ class EventRepository:
                         str(event.bulletin_channel_id) if event.bulletin_channel_id else None,
                         str(event.bulletin_message_id) if event.bulletin_message_id else None,
                         str(event.bulletin_thread_id) if event.bulletin_thread_id else None,
+                        event.archived_at,
                         event.recurrence.type.value if event.recurrence else "none",
                         event.recurrence.interval if event.recurrence else 1,
                         event.recurrence.end_date if event.recurrence else None,
@@ -291,6 +293,7 @@ class EventRepository:
                         bulletin_channel_id = ?,
                         bulletin_message_id = ?,
                         bulletin_thread_id = ?,
+                        archived_at = ?,
                         recurrence_type = ?,
                         recurrence_interval = ?,
                         recurrence_end_date = ?,
@@ -308,6 +311,7 @@ class EventRepository:
                         str(event.bulletin_channel_id) if event.bulletin_channel_id else None,
                         str(event.bulletin_message_id) if event.bulletin_message_id else None,
                         str(event.bulletin_thread_id) if event.bulletin_thread_id else None,
+                        event.archived_at,
                         event.recurrence.type.value if event.recurrence else "none",
                         event.recurrence.interval if event.recurrence else 1,
                         event.recurrence.end_date if event.recurrence else None,
@@ -498,6 +502,7 @@ class EventRepository:
             bulletin_channel_id=int(row["bulletin_channel_id"]) if row.get("bulletin_channel_id") else None,
             bulletin_message_id=int(row["bulletin_message_id"]) if row.get("bulletin_message_id") else None,
             bulletin_thread_id=int(row["bulletin_thread_id"]) if row.get("bulletin_thread_id") else None,
+            archived_at=row.get("archived_at"),
             rsvp=rsvp,
             slots=slots,
             availability=availability,
