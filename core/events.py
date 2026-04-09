@@ -1,6 +1,6 @@
 from core.logging import get_logger, log_event_action
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Set, Dict, Any, Optional, Union, Tuple, List
 from enum import Enum
 import uuid
@@ -333,6 +333,111 @@ def get_event_history(guild_id: int, event_name: Optional[str] = None) -> List[E
         return datetime.min
 
     return sorted(archived.values(), key=sort_key, reverse=True)
+
+
+def generate_recurring_instances(parent: EventState, window_days: int = 28) -> int:
+    """
+    Create child event instances for a recurring parent within the next window_days.
+
+    Only creates instances that don't already exist (idempotent).
+    Returns the number of new instances created.
+    """
+    if not parent.is_recurring:
+        return 0
+    if not parent.confirmed_date or parent.confirmed_date == "TBD":
+        return 0
+
+    import calendar as _calendar
+    from datetime import timezone as _tz
+
+    try:
+        parent_dt = datetime.fromisoformat(parent.confirmed_date)
+        if parent_dt.tzinfo is None:
+            parent_dt = parent_dt.replace(tzinfo=_tz.utc)
+
+        now = datetime.now(_tz.utc)
+        window_end = now + timedelta(days=window_days)
+        recurrence = parent.recurrence
+
+        def _next_monthly(dt: datetime, interval: int) -> datetime:
+            month = dt.month + interval
+            year = dt.year + (month - 1) // 12
+            month = ((month - 1) % 12) + 1
+            last_day = _calendar.monthrange(year, month)[1]
+            return dt.replace(year=year, month=month, day=min(dt.day, last_day))
+
+        if recurrence.type == RecurrenceType.DAILY:
+            delta: Optional[timedelta] = timedelta(days=recurrence.interval or 1)
+        elif recurrence.type == RecurrenceType.WEEKLY:
+            delta = timedelta(weeks=recurrence.interval or 1)
+        elif recurrence.type == RecurrenceType.BIWEEKLY:
+            delta = timedelta(weeks=2 * (recurrence.interval or 1))
+        elif recurrence.type == RecurrenceType.MONTHLY:
+            delta = None
+        else:
+            return 0
+
+        # Gather confirmed_dates of existing children to skip duplicates
+        repo = _get_repo()
+        existing_children = repo.get_events_by_parent(int(parent.guild_id), parent.event_id)
+        existing_dates = {c.confirmed_date for c in existing_children}
+
+        # Advance to first instance that falls within the window
+        current_dt = parent_dt
+        occurrence_num = 0
+        while current_dt < now:
+            if delta:
+                current_dt += delta
+            else:
+                current_dt = _next_monthly(current_dt, recurrence.interval or 1)
+            occurrence_num += 1
+
+        created = 0
+        while current_dt <= window_end:
+            if recurrence.end_date:
+                end_dt = datetime.fromisoformat(recurrence.end_date)
+                if end_dt.tzinfo is None:
+                    end_dt = end_dt.replace(tzinfo=_tz.utc)
+                if current_dt > end_dt:
+                    break
+            if recurrence.occurrences and occurrence_num >= recurrence.occurrences:
+                break
+
+            iso_dt = current_dt.isoformat()
+            if iso_dt not in existing_dates:
+                date_label = current_dt.strftime("%b %d")
+                child = EventState(
+                    guild_id=parent.guild_id,
+                    event_name=f"{parent.event_name} - {date_label}",
+                    max_attendees=parent.max_attendees,
+                    organizer=parent.organizer,
+                    organizer_cname=parent.organizer_cname,
+                    confirmed_date=iso_dt,
+                    availability={iso_dt: {}},
+                    recurrence=RecurrenceConfig(
+                        type=recurrence.type,
+                        interval=recurrence.interval,
+                        end_date=recurrence.end_date,
+                        occurrences=recurrence.occurrences,
+                        parent_event_id=parent.event_id,
+                    ),
+                )
+                repo.create_event(child)
+                existing_dates.add(iso_dt)
+                created += 1
+                logger.info(f"Created recurring instance '{child.event_name}'")
+
+            occurrence_num += 1
+            if delta:
+                current_dt += delta
+            else:
+                current_dt = _next_monthly(current_dt, recurrence.interval or 1)
+
+        return created
+
+    except Exception as e:
+        logger.error(f"Error generating recurring instances for '{parent.event_name}': {e}", exc_info=True)
+        return 0
 
 
 def get_recurring_event_history(guild_id: int, parent_event_id: str) -> List[EventState]:
