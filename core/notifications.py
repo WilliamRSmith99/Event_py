@@ -274,13 +274,17 @@ async def send_dm_notification(
     client: discord.Client,
     user_id: int,
     message: str,
-    embed: Optional[discord.Embed] = None
+    embed: Optional[discord.Embed] = None,
+    guild_id: Optional[int] = None,
 ) -> bool:
     """
     Send a DM notification to a user.
 
+    If the DM fails (user has DMs disabled) and guild_id is provided,
+    falls back to the guild's configured notification_channel as a mention.
+
     Returns:
-        True if sent successfully, False otherwise
+        True if delivered (DM or channel fallback), False if all attempts failed.
     """
     try:
         user = await client.fetch_user(user_id)
@@ -289,9 +293,26 @@ async def send_dm_notification(
             logger.info(f"Sent DM notification to user {user_id}")
             return True
     except discord.Forbidden:
-        logger.warning(f"Cannot send DM to user {user_id} - DMs disabled")
+        logger.warning(f"Cannot send DM to user {user_id} — DMs disabled; trying channel fallback")
     except discord.HTTPException as e:
-        logger.error(f"Failed to send DM to user {user_id}: {e}")
+        logger.error(f"Failed to send DM to user {user_id}: {e}; trying channel fallback")
+
+    # Channel fallback — only if we know which guild to post in
+    if guild_id:
+        try:
+            from core.conf import get_config
+            guild_config = get_config(guild_id)
+            channel_id = guild_config.notification_channel
+            if channel_id:
+                channel = client.get_channel(int(channel_id))
+                if channel:
+                    fallback_msg = f"<@{user_id}> {message}"
+                    await channel.send(content=fallback_msg, embed=embed)
+                    logger.info(f"Delivered notification for user {user_id} via channel {channel_id}")
+                    return True
+        except Exception as e:
+            logger.error(f"Channel fallback failed for user {user_id} in guild {guild_id}: {e}")
+
     return False
 
 
@@ -322,7 +343,7 @@ async def notify_event_reminder(
                 f"Don't forget to check your availability and join when it starts."
             )
 
-            if await send_dm_notification(client, pref.user_id, message):
+            if await send_dm_notification(client, pref.user_id, message, guild_id=guild_id):
                 sent_count += 1
 
     logger.info(f"Sent {sent_count} reminder notifications for event '{event_name}'")
@@ -352,7 +373,7 @@ async def notify_event_start(
                 f"Head over to the server to join in."
             )
 
-            if await send_dm_notification(client, pref.user_id, message):
+            if await send_dm_notification(client, pref.user_id, message, guild_id=guild_id):
                 sent_count += 1
 
     logger.info(f"Sent {sent_count} start notifications for event '{event_name}'")
@@ -380,7 +401,7 @@ async def notify_event_canceled(
             if reason:
                 message += f"\n\n**Reason:** {reason}"
 
-            if await send_dm_notification(client, pref.user_id, message):
+            if await send_dm_notification(client, pref.user_id, message, guild_id=guild_id):
                 sent_count += 1
 
     # Clean up preferences for this event
@@ -413,7 +434,7 @@ async def notify_event_changed(
                 f"**Changes:**\n{changes}"
             )
 
-            if await send_dm_notification(client, pref.user_id, message):
+            if await send_dm_notification(client, pref.user_id, message, guild_id=guild_id):
                 sent_count += 1
 
     logger.info(f"Sent {sent_count} change notifications for event '{event_name}'")
@@ -444,7 +465,7 @@ async def notify_event_confirmed(
             f"You'll receive a reminder before it starts."
         )
 
-        if await send_dm_notification(client, pref.user_id, message):
+        if await send_dm_notification(client, pref.user_id, message, guild_id=guild_id):
             sent_count += 1
 
     logger.info(f"Sent {sent_count} confirmation notifications for event '{event_name}'")
