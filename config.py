@@ -89,4 +89,19 @@ def validate_config() -> list[str]:
     if not DISCORD_TOKEN:
         errors.append("DISCORD_TOKEN environment variable is required")
 
+    # Stripe is configured but WEB_BASE_URL still points at localhost —
+    # Stripe cannot deliver webhooks to a local address in production.
+    stripe_configured = bool(STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET)
+    if stripe_configured and "localhost" in WEB_BASE_URL:
+        msg = (
+            f"WEB_BASE_URL is '{WEB_BASE_URL}' but Stripe is configured. "
+            "Stripe cannot deliver webhooks to localhost. "
+            "Set WEB_BASE_URL to your public HTTPS URL (e.g. https://your-domain.com)."
+        )
+        if ENV == "production":
+            errors.append(msg)
+        else:
+            # Dev: print a visible warning but don't abort
+            print(f"⚠️  Config Warning: {msg}")
+
     return errors
