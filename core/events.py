@@ -1,4 +1,3 @@
-from core.storage import read_json, write_json_atomic
 from core.logging import get_logger, log_event_action
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -97,7 +96,6 @@ class EventState:
             "archived_at": self.archived_at,
             "created_at": self.created_at,
         }
-        # Only include recurrence if set
         if self.recurrence:
             result["recurrence"] = self.recurrence.to_dict()
         return result
@@ -108,16 +106,13 @@ class EventState:
         if "recurrence" in data and data["recurrence"]:
             recurrence = RecurrenceConfig.from_dict(data["recurrence"])
 
-        # Convert organizer to int (backwards compatibility with string storage)
         organizer = data["organizer"]
         if isinstance(organizer, str):
             organizer = int(organizer)
 
-        # Convert rsvp list to ints
         rsvp_raw = data.get("rsvp", [])
         rsvp = [int(uid) if isinstance(uid, str) else uid for uid in rsvp_raw]
 
-        # Convert availability user IDs to ints
         availability_raw = data.get("availability", {})
         availability = {}
         for slot, users in availability_raw.items():
@@ -149,17 +144,14 @@ class EventState:
 
     @property
     def is_archived(self) -> bool:
-        """Check if this event has been archived."""
         return self.archived_at is not None
 
     @property
     def is_past(self) -> bool:
-        """Check if this event's confirmed date has passed."""
         if not self.confirmed_date or self.confirmed_date == "TBD":
             return False
         try:
             event_time = datetime.fromisoformat(self.confirmed_date)
-            # Handle timezone-aware datetimes by making utcnow() aware
             if event_time.tzinfo is not None:
                 from datetime import timezone
                 now = datetime.now(timezone.utc)
@@ -171,151 +163,94 @@ class EventState:
 
     @property
     def is_recurring(self) -> bool:
-        """Check if this is a recurring event."""
         return self.recurrence is not None and self.recurrence.type != RecurrenceType.NONE
 
-DATA_FILE_NAME = "events.json"
 
-# ========== In-Memory Store ==========
+# ========== SQLite-backed CRUD ==========
 
-def load_events() -> Dict[str, Dict[str, Dict[str, Union[EventState, Any]]]]:
-    try:
-        raw = read_json(DATA_FILE_NAME)
-        for guild_id, guild_data in raw.items():
-            events = guild_data.get("events", {})
-            raw[guild_id]["events"] = {
-                eid: EventState.from_dict(edata) for eid, edata in events.items()
-            }
-        return raw
-    except FileNotFoundError:
-        return {}
+_repo = None
 
-events_list = load_events()
 
-# ========== Save ==========
+def _get_repo():
+    """Lazy-load EventRepository to avoid circular imports."""
+    global _repo
+    if _repo is None:
+        from core.repositories.events import EventRepository
+        _repo = EventRepository
+    return _repo
 
-def save_events(data: Dict[str, Dict[str, Dict[str, EventState]]]) -> None:
-    to_save = {
-        gid: {
-            "events": {
-                eid: e.to_dict() for eid, e in gdata.get("events", {}).items()
-            }
-        }
-        for gid, gdata in data.items()
-    }
-    write_json_atomic(DATA_FILE_NAME, to_save)
-
-# ========== CRUD ==========
 
 def get_event(guild_id: int, event_name: str) -> Optional[EventState]:
-    events_list = load_events()
-    return events_list.get(str(guild_id), {}).get("events", {}).get(event_name)
+    return _get_repo().get_event(guild_id, event_name)
+
 
 def get_events(guild_id: int, name: Optional[str] = None) -> Dict[str, EventState]:
-    events_list = load_events()
-    guild_id_str = str(guild_id)
-    raw_events = events_list.get(guild_id_str, {}).get("events", {})
-    events = {
-        name: event if isinstance(event, EventState) else EventState.from_dict(event)
-        for name, event in raw_events.items()
-    }
+    return _get_repo().get_events(guild_id, name_filter=name)
 
-    if not name:
-        return events
-
-    name_lower = name.lower()
-    for event_name in events:
-        if event_name.lower() == name_lower:
-            return {event_name: events[event_name]}
-
-    return {
-        event_name: event
-        for event_name, event in events.items()
-        if name_lower in event_name.lower() or event_name.lower().startswith(name_lower)
-    }
 
 def modify_event(event_state: Union[EventState, dict]) -> None:
-    guild_id = str(event_state.guild_id if isinstance(event_state, EventState) else event_state.get("guild_id"))
-    event_name = event_state.event_name if isinstance(event_state, EventState) else event_state.get("event_name")
-
-    # Always reload from disk to avoid race conditions
-    current_events = load_events()
-
-    if guild_id not in current_events:
-        current_events[guild_id] = {"events": {}}
-
+    """Upsert an event to SQLite."""
+    repo = _get_repo()
     if isinstance(event_state, dict):
         event_state = EventState.from_dict(event_state)
 
-    current_events[guild_id]["events"][event_name] = event_state
-    save_events(current_events)
+    existing = None
+    if event_state.event_id:
+        existing = repo.get_event_by_id(event_state.event_id)
+
+    if existing:
+        repo.update_event(event_state)
+    else:
+        repo.create_event(event_state)
+
 
 def delete_event(guild_id: str, event_name: str) -> bool:
-    # Always reload from disk to avoid race conditions
-    current_events = load_events()
-    try:
-        del current_events[str(guild_id)]["events"][event_name]
-        save_events(current_events)
+    result = _get_repo().delete_event(int(guild_id), event_name)
+    if result:
         log_event_action("delete", guild_id, event_name)
-        return True
-    except KeyError as e:
+    else:
         logger.warning(f"Event not found for deletion: {event_name} in guild {guild_id}")
-        return False
+    return result
 
 
 def rename_event(guild_id: int, old_name: str, new_name: str) -> Optional[EventState]:
-    """
-    Renames an event.
-
-    Args:
-        guild_id: The Discord guild ID
-        old_name: The current event name
-        new_name: The new event name
-
-    Returns:
-        The renamed EventState object, or None if the old event was not found
-        or the new name already exists.
-    """
+    """Rename an event. Returns the updated EventState or None on failure."""
+    repo = _get_repo()
     guild_id_str = str(guild_id)
-    # Always reload from disk to avoid race conditions
-    current_events = load_events()
 
-    guild_events = current_events.get(guild_id_str, {}).get("events", {})
+    # Check new name doesn't already exist (case-insensitive)
+    existing = repo.get_events(guild_id, name_filter=new_name)
+    for name in existing.keys():
+        if name.lower() == new_name.lower() and name.lower() != old_name.lower():
+            logger.warning(f"Failed to rename: '{new_name}' already exists in guild {guild_id}")
+            return None
 
-    # Check if new name already exists
-    if new_name.lower() in [name.lower() for name in guild_events.keys()] and new_name.lower() != old_name.lower():
-        logger.warning(f"Failed to rename: new event name '{new_name}' already exists in guild {guild_id}")
-        return None
-
-    # Find and remove old event
+    # Find the event to rename
+    candidates = repo.get_events(guild_id, name_filter=old_name)
     event_to_rename = None
-    
-    # Need to iterate over a copy of keys since we are modifying the dict
-    for event_name in list(guild_events.keys()):
-        if event_name.lower() == old_name.lower():
-            event_to_rename = guild_events.pop(event_name)
+    for name, event in candidates.items():
+        if name.lower() == old_name.lower():
+            event_to_rename = event
             break
-    
+
     if not event_to_rename:
-        logger.warning(f"Failed to rename: event '{old_name}' not found in guild {guild_id}")
+        logger.warning(f"Failed to rename: '{old_name}' not found in guild {guild_id}")
         return None
-        
-    # Update name and put it back
+
     event_to_rename.event_name = new_name
-    guild_events[new_name] = event_to_rename
-
-    current_events[guild_id_str]["events"] = guild_events
-    save_events(current_events)
+    repo.update_event(event_to_rename)
     log_event_action("rename", guild_id_str, old_name, new_name=new_name)
-
     return event_to_rename
 
+
+# ========== Utility Functions ==========
 
 def remove_user_from_queue(queue: dict, user_id: int) -> dict:
     """Remove a user from a queue and reorder positions."""
     return {str(i + 1): v for i, (k, v) in enumerate(
         (item for item in sorted(queue.items(), key=lambda x: int(x[0])) if item[1] != user_id)
     )}
+
 
 def user_has_any_availability(user_id: int, availability: dict) -> bool:
     """Check if a user has any availability in any slot."""
@@ -328,22 +263,9 @@ def user_has_any_availability(user_id: int, availability: dict) -> bool:
 # ========== Archiving Functions ==========
 
 def archive_event(guild_id: str, event_name: str) -> bool:
-    """
-    Archive an event (mark it as past/completed).
-
-    Archived events are kept for history but excluded from active event lists.
-
-    Args:
-        guild_id: The Discord guild ID
-        event_name: The event name
-
-    Returns:
-        True if archived successfully
-    """
     event = get_event(int(guild_id), event_name)
     if not event:
         return False
-
     event.archived_at = datetime.utcnow().isoformat()
     modify_event(event)
     log_event_action("archive", guild_id, event_name)
@@ -351,20 +273,6 @@ def archive_event(guild_id: str, event_name: str) -> bool:
 
 
 def get_active_events(guild_id: int, name: Optional[str] = None) -> Dict[str, EventState]:
-    """
-    Get only active (non-archived, non-past) events for a guild.
-
-    This filters out:
-    - Events that have been explicitly archived
-    - Events whose confirmed date has passed
-
-    Args:
-        guild_id: The Discord guild ID
-        name: Optional event name filter
-
-    Returns:
-        Dict of active events
-    """
     all_events = get_events(guild_id, name)
     return {
         event_name: event
@@ -374,17 +282,6 @@ def get_active_events(guild_id: int, name: Optional[str] = None) -> Dict[str, Ev
 
 
 def get_archived_events(guild_id: int) -> Dict[str, EventState]:
-    """
-    Get archived events for a guild (event history).
-
-    Returns events that have been archived or whose confirmed date has passed.
-
-    Args:
-        guild_id: The Discord guild ID
-
-    Returns:
-        Dict of archived events
-    """
     all_events = get_events(guild_id)
     return {
         event_name: event
@@ -394,17 +291,6 @@ def get_archived_events(guild_id: int) -> Dict[str, EventState]:
 
 
 def get_past_events(guild_id: int) -> List[EventState]:
-    """
-    Get events that have passed but not yet been archived.
-
-    Useful for batch archiving and bulletin updates.
-
-    Args:
-        guild_id: The Discord guild ID
-
-    Returns:
-        List of past events
-    """
     all_events = get_events(guild_id)
     return [
         event for event in all_events.values()
@@ -413,52 +299,26 @@ def get_past_events(guild_id: int) -> List[EventState]:
 
 
 def archive_past_events(guild_id: int) -> int:
-    """
-    Archive all past events for a guild.
-
-    Args:
-        guild_id: The Discord guild ID
-
-    Returns:
-        Number of events archived
-    """
     past_events = get_past_events(guild_id)
     archived_count = 0
-
     for event in past_events:
         if archive_event(str(guild_id), event.event_name):
             archived_count += 1
-
     if archived_count > 0:
         logger.info(f"Archived {archived_count} past events for guild {guild_id}")
-
     return archived_count
 
 
 def get_event_history(guild_id: int, event_name: Optional[str] = None) -> List[EventState]:
-    """
-    Get event history for a guild (archived events).
-
-    For recurring events, this shows all past occurrences.
-
-    Args:
-        guild_id: The Discord guild ID
-        event_name: Optional filter by event name (for recurring event history)
-
-    Returns:
-        List of archived events, sorted by date (newest first)
-    """
     archived = get_archived_events(guild_id)
 
     if event_name:
-        # Filter by event name (exact or partial for recurring event series)
         name_lower = event_name.lower()
         archived = {
             k: v for k, v in archived.items()
             if name_lower in k.lower() or k.lower().startswith(name_lower)
         }
 
-    # Sort by confirmed_date or archived_at, newest first
     def sort_key(event: EventState):
         if event.confirmed_date and event.confirmed_date != "TBD":
             try:
@@ -476,29 +336,16 @@ def get_event_history(guild_id: int, event_name: Optional[str] = None) -> List[E
 
 
 def get_recurring_event_history(guild_id: int, parent_event_id: str) -> List[EventState]:
-    """
-    Get all past occurrences of a recurring event.
-
-    Args:
-        guild_id: The Discord guild ID
-        parent_event_id: The parent event ID for the recurring series
-
-    Returns:
-        List of past occurrences, sorted by date (newest first)
-    """
     all_events = get_events(guild_id)
     archived = get_archived_events(guild_id)
 
-    # Combine and filter by parent_event_id
     all_occurrences = []
-
     for event in list(all_events.values()) + list(archived.values()):
         if event.recurrence and event.recurrence.parent_event_id == parent_event_id:
             all_occurrences.append(event)
         elif event.event_id == parent_event_id:
             all_occurrences.append(event)
 
-    # Sort by confirmed_date, newest first
     def sort_key(event: EventState):
         if event.confirmed_date and event.confirmed_date != "TBD":
             try:

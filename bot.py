@@ -146,7 +146,7 @@ async def on_interaction(interaction: discord.Interaction):
                     ephemeral=True
                 )
             except Exception:
-                pass
+                logger.debug("Could not send error response to user after interaction failure")
 
 
 @client.event

@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 DB_PATH = Path(config.DATA_DIR) / "eventbot.db"
 
 # Schema version for migrations
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 # =============================================================================
@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS events (
     bulletin_channel_id TEXT,
     bulletin_message_id TEXT,
     bulletin_thread_id TEXT,
+    archived_at TEXT,  -- ISO datetime when archived, NULL if active
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now')),
 
@@ -375,8 +376,15 @@ def init_database() -> None:
                     cursor.execute("ALTER TABLE user_data ADD COLUMN use_24hr_time INTEGER")
                     logger.info("Migration: Added use_24hr_time column to user_data")
                 except sqlite3.OperationalError:
-                    # Column already exists
-                    pass
+                    pass  # Column already exists
+
+            if current_version < 3:
+                # Add archived_at column to events
+                try:
+                    cursor.execute("ALTER TABLE events ADD COLUMN archived_at TEXT")
+                    logger.info("Migration v3: Added archived_at column to events")
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
 
             cursor.execute(
                 "INSERT INTO schema_version (version) VALUES (?)",
