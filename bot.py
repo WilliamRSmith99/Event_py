@@ -10,6 +10,7 @@ from commands.event import register, create, list as event_list, export as event
 from commands.user import notifications as notif_commands, settings as user_settings
 from commands.admin import premium
 from core import bulletins, notifications, logging as bot_logging
+from core.permissions import require_permission, PermissionLevel
 from core.database import init_database
 from core.stripe_integration import is_stripe_configured
 
@@ -52,6 +53,8 @@ guild = discord.Object(id=config.DEV_GUILD_ID) if config.DEV_GUILD_ID else None
 @tree.command(name="create", description="Create a new event", guild=guild)
 async def create_event(interaction: discord.Interaction):
     """Command to start creating a new event."""
+    if not await require_permission(interaction, PermissionLevel.ORGANIZER):
+        return
     await interaction.response.send_modal(create.NewEventModal())
 
 @tree.command(name="events", description="View events", guild=guild)
@@ -75,6 +78,8 @@ async def settings_command(interaction: discord.Interaction):
 
 @tree.command(name="server_settings", description="Configure server-wide settings", guild=guild)
 async def configure_bot(interaction: discord.Interaction):
+    if not await require_permission(interaction, PermissionLevel.ADMIN):
+        return
     await settings.PaginatedSettingsContext(interaction=interaction, guild_id=interaction.guild_id)
 
 # ============================================================
