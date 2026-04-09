@@ -6,10 +6,11 @@ import asyncio
 
 import config
 from commands.configs import settings
-from commands.event import register, create, list as event_list
+from commands.event import register, create, list as event_list, export as event_export
 from commands.user import notifications as notif_commands, settings as user_settings
 from commands.admin import premium
 from core import bulletins, notifications, logging as bot_logging
+from core.permissions import require_permission, PermissionLevel
 from core.database import init_database
 from core.stripe_integration import is_stripe_configured
 
@@ -52,6 +53,8 @@ guild = discord.Object(id=config.DEV_GUILD_ID) if config.DEV_GUILD_ID else None
 @tree.command(name="create", description="Create a new event", guild=guild)
 async def create_event(interaction: discord.Interaction):
     """Command to start creating a new event."""
+    if not await require_permission(interaction, PermissionLevel.ORGANIZER):
+        return
     await interaction.response.send_modal(create.NewEventModal())
 
 @tree.command(name="events", description="View events", guild=guild)
@@ -59,6 +62,11 @@ async def create_event(interaction: discord.Interaction):
 async def events_command(interaction: discord.Interaction, filter: Optional[str] = None):
     """Command to view events, optionally filter by event name."""
     await event_list.event_info(interaction, filter)
+
+@tree.command(name="export", description="Export an event to iCal (.ics) for Google Calendar, Outlook, etc.", guild=guild)
+@app_commands.describe(event_name="Name of the event to export")
+async def export_command(interaction: discord.Interaction, event_name: str):
+    await event_export.export_event(interaction, event_name)
 
 # ============================================================
 #                        USER COMMANDS
@@ -70,6 +78,8 @@ async def settings_command(interaction: discord.Interaction):
 
 @tree.command(name="server_settings", description="Configure server-wide settings", guild=guild)
 async def configure_bot(interaction: discord.Interaction):
+    if not await require_permission(interaction, PermissionLevel.ADMIN):
+        return
     await settings.PaginatedSettingsContext(interaction=interaction, guild_id=interaction.guild_id)
 
 # ============================================================

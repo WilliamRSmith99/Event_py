@@ -8,6 +8,31 @@ from discord import ButtonStyle
 logger = get_logger(__name__)
 MAX_TIME_BUTTONS = 20
 
+
+async def _notify_promoted_users(
+    client: discord.Client,
+    event,
+    slot_utc: str,
+    old_queue: dict,
+    new_queue: dict,
+    max_att: int,
+) -> None:
+    """DM any users who moved from an implicit waitlist position into a confirmed spot."""
+    old_waitlisted = {uid for pos, uid in old_queue.items() if int(pos) > max_att}
+    now_confirmed = {uid for pos, uid in new_queue.items() if int(pos) <= max_att}
+    promoted = old_waitlisted & now_confirmed
+    if not promoted:
+        return
+
+    from core.notifications import send_dm_notification
+    for uid in promoted:
+        await send_dm_notification(
+            client,
+            int(uid),
+            f"🎉 **You're in!** A spot opened up for **{event.event_name}** "
+            f"and you've been moved off the waitlist. You're now registered!",
+        )
+
 async def schedule_command(interaction: discord.Interaction, event_name: str, eph_resp: bool = False):
     guild_id = interaction.guild_id
     matches = events.get_events(guild_id, event_name)
@@ -103,6 +128,8 @@ async def _toggle_single_slot_registration(interaction: discord.Interaction, eve
 
     if is_registered:
         # Unregister user
+        max_att = int(event.max_attendees) if event.max_attendees and str(event.max_attendees) != "0" else None
+        old_queue = dict(slot_availability)
         updated_queue = events.remove_user_from_queue(slot_availability, user_id)
         event.availability[confirmed_slot] = updated_queue
         # Remove from RSVP if no longer has any availability
@@ -119,6 +146,12 @@ async def _toggle_single_slot_registration(interaction: discord.Interaction, eve
         if user_id not in event.rsvp:
             event.rsvp.append(user_id)
         action_msg = f"✅ You have been **registered** for **{event.event_name}**!"
+
+    # Promote waitlisted users if a spot just opened
+    if is_registered and max_att:
+        await _notify_promoted_users(
+            interaction.client, event, confirmed_slot, old_queue, updated_queue, max_att
+        )
 
     # Save changes
     events.modify_event(event)
@@ -235,11 +268,17 @@ class SubmitAllButton(Button):
                 view.event.availability[utc_iso_str][next_position] = view.user_id
                 changed_slots.add(utc_iso_str)
 
+        max_att = int(view.event.max_attendees) if view.event.max_attendees and str(view.event.max_attendees) != "0" else None
+        slots_to_promote: list[tuple] = []  # (slot_utc, old_queue, new_queue)
+
         for utc_iso_str, user_dict in view.event.availability.items():
             if utc_iso_str not in selected_utc_iso_strs and view.user_id in user_dict.values():
+                old_q = dict(user_dict)
                 updated_queue = events.remove_user_from_queue(user_dict, view.user_id)
                 view.event.availability[utc_iso_str] = updated_queue
                 changed_slots.add(utc_iso_str)
+                if max_att:
+                    slots_to_promote.append((utc_iso_str, old_q, updated_queue))
 
         # Update RSVP list safely
         has_availability = events.user_has_any_availability(view.user_id, view.event.availability)
@@ -256,6 +295,10 @@ class SubmitAllButton(Button):
         if changed_slots:
             log_event_action("register", event_data.guild_id, event_data.event_name, user_id=view.user_id)
             events.modify_event(event_data)
+
+            # Notify anyone promoted off the implicit waitlist
+            for slot_utc, old_q, new_q in slots_to_promote:
+                await _notify_promoted_users(interaction.client, event_data, slot_utc, old_q, new_q, max_att)
 
             # Try to update only affected bulletin messages (non-blocking)
             try:

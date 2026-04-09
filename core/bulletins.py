@@ -466,10 +466,25 @@ async def handle_slot_selection(interaction: discord.Interaction, selected_slot:
             event.rsvp.append(user_id)
     else:
         # Unregister user
+        max_att = int(event.max_attendees) if event.max_attendees and str(event.max_attendees) != "0" else None
+        old_queue = dict(slot_availability)
         updated_queue = events.remove_user_from_queue(slot_availability, user_id)
         event.availability[selected_slot] = updated_queue
         if not events.user_has_any_availability(user_id, event.availability) and user_id in event.rsvp:
             event.rsvp.remove(user_id)
+
+        # Notify anyone promoted off the implicit waitlist
+        if max_att:
+            old_waitlisted = {uid for pos, uid in old_queue.items() if int(pos) > max_att}
+            now_confirmed = {uid for pos, uid in updated_queue.items() if int(pos) <= max_att}
+            for promoted_uid in old_waitlisted & now_confirmed:
+                from core.notifications import send_dm_notification
+                await send_dm_notification(
+                    interaction.client,
+                    int(promoted_uid),
+                    f"🎉 **You're in!** A spot opened up for **{event.event_name}** "
+                    f"and you've been moved off the waitlist. You're now registered!",
+                )
 
     events.modify_event(event)
 

@@ -144,6 +144,13 @@ async def require_permission(
     Returns:
         True if permission granted, False if denied (error already sent)
     """
+    # Block commands used outside a guild (DMs)
+    if not interaction.guild_id:
+        await interaction.response.send_message(
+            "❌ This command can only be used inside a server.", ephemeral=True
+        )
+        return False
+
     # Organizer always has access to their own events
     if organizer_id and interaction.user.id == organizer_id:
         return True
