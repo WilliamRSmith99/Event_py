@@ -1,5 +1,6 @@
 import discord
 from discord.ui import Button, View
+from datetime import datetime
 from commands.user import timezone
 from core import utils, userdata, events, conf
 from core.logging import get_logger
@@ -68,11 +69,19 @@ class OverlapSummaryButton(Button):
             usernames.append(member.display_name if member else f"<@{uid}>")
 
         date_str = local_dt.strftime("%B %d")
-        # Get user's effective time format preference
         use_24hr = userdata.get_effective_time_format(interaction.user.id, interaction.guild_id)
         time_str = utils.format_time(local_dt, use_24hr)
 
-        attendee_view = AttendeeView(self.view, self.datetime_iso)
+        # Determine if the viewer can confirm this slot
+        event = self.view.event
+        show_confirm = interaction.user.id == event.organizer
+        if not show_confirm:
+            from core.permissions import has_permission, PermissionLevel
+            from core.conf import get_config
+            guild_config = get_config(interaction.guild_id)
+            show_confirm = has_permission(interaction.user, guild_config, PermissionLevel.ADMIN)
+
+        attendee_view = AttendeeView(self.view, self.datetime_iso, show_confirm=show_confirm)
         await interaction.response.edit_message(
             content=f"👥 **Users available at {time_str} on {date_str}**:\n- " + "\n- ".join(usernames),
             view=attendee_view
@@ -227,23 +236,102 @@ class OverlapSummaryView(View):
             disabled=self.date_page >= total_date_pages - 1
         ))
 
+class ConfirmSlotButton(Button):
+    """Organizer/admin-only button to set this slot as the confirmed event time."""
+
+    def __init__(self):
+        super().__init__(
+            label="✅ Confirm this time",
+            style=discord.ButtonStyle.success,
+            custom_id="confirm_slot",
+            row=4,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        view: "AttendeeView" = self.view
+        event = view.original_view.event
+        utc_iso = view.datetime_iso
+
+        # Runtime permission check (guard against someone forwarding the message etc.)
+        is_allowed = interaction.user.id == event.organizer
+        if not is_allowed:
+            from core.permissions import has_permission, PermissionLevel
+            from core.conf import get_config
+            guild_config = get_config(interaction.guild_id)
+            is_allowed = has_permission(interaction.user, guild_config, PermissionLevel.ADMIN)
+
+        if not is_allowed:
+            await interaction.response.edit_message(
+                content="❌ Only the event organizer or a server admin can confirm a time.",
+                view=view,
+            )
+            return
+
+        # Commit the confirmed date
+        event.confirmed_date = utc_iso
+        events.modify_event(event)
+
+        confirmed_dt = datetime.fromisoformat(utc_iso)
+        time_display = f"<t:{int(confirmed_dt.timestamp())}:F>"
+
+        # Notify all RSVPed users
+        notified = 0
+        try:
+            from core.notifications import notify_event_confirmed
+            notified = await notify_event_confirmed(
+                interaction.client,
+                int(event.guild_id),
+                event.event_name,
+                confirmed_dt,
+            )
+        except Exception as e:
+            logger.warning(f"Could not send confirmation notifications: {e}")
+
+        # Update bulletin header if one exists
+        try:
+            from core import bulletins
+            await bulletins.update_bulletin_header(interaction.client, event)
+        except Exception as e:
+            logger.warning(f"Could not update bulletin after confirm: {e}")
+
+        attendee_line = f"\n📬 Notified {notified} registered attendee(s)." if notified else ""
+        await interaction.response.edit_message(
+            content=(
+                f"✅ **{event.event_name}** confirmed for {time_display}!{attendee_line}"
+            ),
+            view=None,
+        )
+
+
 class AttendeeView(View):
-    def __init__(self, original_view: OverlapSummaryView, utc_iso: str):
+    def __init__(self, original_view: OverlapSummaryView, utc_iso: str, show_confirm: bool = False):
         super().__init__(timeout=None)
         self.original_view = original_view
         self.datetime_iso = utc_iso
 
-    @discord.ui.button(label="Back", style=discord.ButtonStyle.danger, custom_id="back_button", row=4)
-    async def back(self, interaction: discord.Interaction, button: Button):
+        if show_confirm:
+            self.add_item(ConfirmSlotButton())
+
+        self.add_item(BackButton(original_view))
+
+
+class BackButton(Button):
+    def __init__(self, original_view: OverlapSummaryView):
+        super().__init__(label="⬅️ Back", style=discord.ButtonStyle.danger, custom_id="back_button", row=4)
+        self.original_view = original_view
+
+    async def callback(self, interaction: discord.Interaction):
+        ov = self.original_view
         await interaction.response.edit_message(
-            content=f"📊 Top availability slots for **{self.original_view.event.event_name}**",
+            content=f"📊 Top availability slots for **{ov.event.event_name}**",
             view=OverlapSummaryView(
-                self.original_view.event,
-                self.original_view.local_availability,
-                self.original_view.user_timezone,
-                self.original_view.date_page,
-                self.original_view.time_page,
-                show_back_button=self.original_view.show_back_button
-            )
+                ov.event,
+                ov.local_availability,
+                ov.user_timezone,
+                ov.date_page,
+                ov.time_page,
+                show_back_button=ov.show_back_button,
+                use_24hr=ov.use_24hr,
+            ),
         )
 
