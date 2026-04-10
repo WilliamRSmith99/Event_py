@@ -13,12 +13,10 @@ from enum import Enum
 from typing import Dict, List, Optional, Set, Any, Union
 import discord
 
-from core.storage import read_json, write_json_atomic
+from core.database import execute_one, execute_query, transaction
 from core.logging import get_logger, log_user_action
 
 logger = get_logger(__name__)
-
-NOTIFICATIONS_FILE = "notifications.json"
 
 
 # =============================================================================
@@ -118,152 +116,116 @@ class ScheduledNotification:
 
 
 # =============================================================================
-# Storage Functions
+# Preference Management (SQLite-backed)
 # =============================================================================
 
-def load_notifications() -> Dict[str, Any]:
-    """Load notifications data from storage."""
-    try:
-        return read_json(NOTIFICATIONS_FILE)
-    except FileNotFoundError:
-        return {"preferences": {}, "scheduled": []}
+def _row_to_pref(row: dict) -> NotificationPreference:
+    return NotificationPreference(
+        user_id=int(row["user_id"]),
+        guild_id=int(row["guild_id"]),
+        event_name=row["event_name"],
+        reminder_minutes=row.get("reminder_minutes", 60),
+        notify_on_start=bool(row.get("notify_on_start", 1)),
+        notify_on_change=bool(row.get("notify_on_change", 1)),
+        notify_on_cancel=bool(row.get("notify_on_cancel", 1)),
+        created_at=row.get("created_at", datetime.utcnow().isoformat()),
+    )
 
-
-def save_notifications(data: Dict[str, Any]) -> None:
-    """Save notifications data to storage."""
-    write_json_atomic(NOTIFICATIONS_FILE, data)
-
-
-# =============================================================================
-# Preference Management
-# =============================================================================
 
 def get_user_preferences(user_id: int, guild_id: int) -> Dict[str, NotificationPreference]:
-    """
-    Get all notification preferences for a user in a guild.
-
-    Returns:
-        Dict mapping event_name -> NotificationPreference
-    """
-    data = load_notifications()
-    key = f"{guild_id}:{user_id}"
-    prefs = data.get("preferences", {}).get(key, {})
-    return {
-        event_name: NotificationPreference.from_dict(pref)
-        for event_name, pref in prefs.items()
-    }
+    """Get all notification preferences for a user in a guild."""
+    rows = execute_query(
+        "SELECT * FROM notification_preferences WHERE user_id = ? AND guild_id = ?",
+        (str(user_id), str(guild_id)),
+    )
+    return {dict(r)["event_name"]: _row_to_pref(dict(r)) for r in rows}
 
 
 def get_event_preference(user_id: int, guild_id: int, event_name: str) -> Optional[NotificationPreference]:
     """Get a user's notification preference for a specific event."""
-    prefs = get_user_preferences(user_id, guild_id)
-    return prefs.get(event_name)
+    row = execute_one(
+        "SELECT * FROM notification_preferences WHERE user_id = ? AND guild_id = ? AND event_name = ?",
+        (str(user_id), str(guild_id), event_name),
+    )
+    return _row_to_pref(dict(row)) if row else None
 
 
 def set_notification_preference(preference: NotificationPreference) -> None:
     """Set or update a user's notification preference for an event."""
-    data = load_notifications()
-    key = f"{preference.guild_id}:{preference.user_id}"
-
-    if "preferences" not in data:
-        data["preferences"] = {}
-    if key not in data["preferences"]:
-        data["preferences"][key] = {}
-
-    data["preferences"][key][preference.event_name] = preference.to_dict()
-    save_notifications(data)
-
+    with transaction() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO notification_preferences
+                (user_id, guild_id, event_name, reminder_minutes,
+                 notify_on_start, notify_on_change, notify_on_cancel)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(user_id, guild_id, event_name) DO UPDATE SET
+                reminder_minutes = excluded.reminder_minutes,
+                notify_on_start  = excluded.notify_on_start,
+                notify_on_change = excluded.notify_on_change,
+                notify_on_cancel = excluded.notify_on_cancel,
+                updated_at       = datetime('now')
+            """,
+            (
+                str(preference.user_id),
+                str(preference.guild_id),
+                preference.event_name,
+                preference.reminder_minutes,
+                int(preference.notify_on_start),
+                int(preference.notify_on_change),
+                int(preference.notify_on_cancel),
+            ),
+        )
     log_user_action(
         "set_notification",
         preference.user_id,
         preference.guild_id,
         event_name=preference.event_name,
-        reminder_minutes=preference.reminder_minutes
+        reminder_minutes=preference.reminder_minutes,
     )
 
 
 def remove_notification_preference(user_id: int, guild_id: int, event_name: str) -> bool:
     """Remove a user's notification preference for an event."""
-    data = load_notifications()
-    key = f"{guild_id}:{user_id}"
-
-    if key in data.get("preferences", {}) and event_name in data["preferences"][key]:
-        del data["preferences"][key][event_name]
-        if not data["preferences"][key]:
-            del data["preferences"][key]
-        save_notifications(data)
-        return True
-    return False
+    with transaction() as cursor:
+        cursor.execute(
+            "DELETE FROM notification_preferences WHERE user_id = ? AND guild_id = ? AND event_name = ?",
+            (str(user_id), str(guild_id), event_name),
+        )
+        return cursor.rowcount > 0
 
 
 def get_users_to_notify(guild_id: int, event_name: str) -> List[NotificationPreference]:
     """Get all users who want notifications for an event."""
-    data = load_notifications()
-    users = []
-
-    for key, prefs in data.get("preferences", {}).items():
-        if key.startswith(f"{guild_id}:"):
-            if event_name in prefs:
-                users.append(NotificationPreference.from_dict(prefs[event_name]))
-
-    return users
+    rows = execute_query(
+        "SELECT * FROM notification_preferences WHERE guild_id = ? AND event_name = ?",
+        (str(guild_id), event_name),
+    )
+    return [_row_to_pref(dict(r)) for r in rows]
 
 
 def migrate_event_notification_preferences(
     guild_id: int,
     old_event_name: str,
-    new_event_name: str
+    new_event_name: str,
 ) -> int:
-    """
-    Migrate notification preferences from old event name to new event name.
-    
-    Called when an event is renamed to preserve user notification settings.
-    
-    Args:
-        guild_id: The Discord guild ID
-        old_event_name: The old event name
-        new_event_name: The new event name
-        
-    Returns:
-        Number of preferences migrated
-    """
-    data = load_notifications()
-    migrated_count = 0
-    
-    for key, prefs in data.get("preferences", {}).items():
-        if key.startswith(f"{guild_id}:"):
-            if old_event_name in prefs:
-                # Get the old preference
-                old_pref = NotificationPreference.from_dict(prefs[old_event_name])
-                
-                # Create new preference with updated event name
-                new_pref = NotificationPreference(
-                    user_id=old_pref.user_id,
-                    guild_id=old_pref.guild_id,
-                    event_name=new_event_name,
-                    reminder_minutes=old_pref.reminder_minutes,
-                    notify_on_start=old_pref.notify_on_start,
-                    notify_on_change=old_pref.notify_on_change,
-                    notify_on_cancel=old_pref.notify_on_cancel,
-                    created_at=old_pref.created_at
-                )
-                
-                # Save new preference
-                prefs[new_event_name] = new_pref.to_dict()
-                
-                # Remove old preference
-                del prefs[old_event_name]
-                
-                migrated_count += 1
-    
-    if migrated_count > 0:
-        save_notifications(data)
-        logger.info(
-            f"Migrated {migrated_count} notification preferences "
-            f"from '{old_event_name}' to '{new_event_name}' in guild {guild_id}"
+    """Migrate notification preferences when an event is renamed."""
+    with transaction() as cursor:
+        cursor.execute(
+            """
+            UPDATE notification_preferences
+            SET event_name = ?, updated_at = datetime('now')
+            WHERE guild_id = ? AND event_name = ?
+            """,
+            (new_event_name, str(guild_id), old_event_name),
         )
-    
-    return migrated_count
+        count = cursor.rowcount
+    if count:
+        logger.info(
+            f"Migrated {count} notification preferences: "
+            f"'{old_event_name}' → '{new_event_name}' in guild {guild_id}"
+        )
+    return count
 
 
 # =============================================================================
@@ -274,13 +236,17 @@ async def send_dm_notification(
     client: discord.Client,
     user_id: int,
     message: str,
-    embed: Optional[discord.Embed] = None
+    embed: Optional[discord.Embed] = None,
+    guild_id: Optional[int] = None,
 ) -> bool:
     """
     Send a DM notification to a user.
 
+    If the DM fails (user has DMs disabled) and guild_id is provided,
+    falls back to the guild's configured notification_channel as a mention.
+
     Returns:
-        True if sent successfully, False otherwise
+        True if delivered (DM or channel fallback), False if all attempts failed.
     """
     try:
         user = await client.fetch_user(user_id)
@@ -289,9 +255,26 @@ async def send_dm_notification(
             logger.info(f"Sent DM notification to user {user_id}")
             return True
     except discord.Forbidden:
-        logger.warning(f"Cannot send DM to user {user_id} - DMs disabled")
+        logger.warning(f"Cannot send DM to user {user_id} — DMs disabled; trying channel fallback")
     except discord.HTTPException as e:
-        logger.error(f"Failed to send DM to user {user_id}: {e}")
+        logger.error(f"Failed to send DM to user {user_id}: {e}; trying channel fallback")
+
+    # Channel fallback — only if we know which guild to post in
+    if guild_id:
+        try:
+            from core.conf import get_config
+            guild_config = get_config(guild_id)
+            channel_id = guild_config.notification_channel
+            if channel_id:
+                channel = client.get_channel(int(channel_id))
+                if channel:
+                    fallback_msg = f"<@{user_id}> {message}"
+                    await channel.send(content=fallback_msg, embed=embed)
+                    logger.info(f"Delivered notification for user {user_id} via channel {channel_id}")
+                    return True
+        except Exception as e:
+            logger.error(f"Channel fallback failed for user {user_id} in guild {guild_id}: {e}")
+
     return False
 
 
@@ -322,7 +305,7 @@ async def notify_event_reminder(
                 f"Don't forget to check your availability and join when it starts."
             )
 
-            if await send_dm_notification(client, pref.user_id, message):
+            if await send_dm_notification(client, pref.user_id, message, guild_id=guild_id):
                 sent_count += 1
 
     logger.info(f"Sent {sent_count} reminder notifications for event '{event_name}'")
@@ -352,7 +335,7 @@ async def notify_event_start(
                 f"Head over to the server to join in."
             )
 
-            if await send_dm_notification(client, pref.user_id, message):
+            if await send_dm_notification(client, pref.user_id, message, guild_id=guild_id):
                 sent_count += 1
 
     logger.info(f"Sent {sent_count} start notifications for event '{event_name}'")
@@ -380,7 +363,7 @@ async def notify_event_canceled(
             if reason:
                 message += f"\n\n**Reason:** {reason}"
 
-            if await send_dm_notification(client, pref.user_id, message):
+            if await send_dm_notification(client, pref.user_id, message, guild_id=guild_id):
                 sent_count += 1
 
     # Clean up preferences for this event
@@ -413,7 +396,7 @@ async def notify_event_changed(
                 f"**Changes:**\n{changes}"
             )
 
-            if await send_dm_notification(client, pref.user_id, message):
+            if await send_dm_notification(client, pref.user_id, message, guild_id=guild_id):
                 sent_count += 1
 
     logger.info(f"Sent {sent_count} change notifications for event '{event_name}'")
@@ -444,7 +427,7 @@ async def notify_event_confirmed(
             f"You'll receive a reminder before it starts."
         )
 
-        if await send_dm_notification(client, pref.user_id, message):
+        if await send_dm_notification(client, pref.user_id, message, guild_id=guild_id):
             sent_count += 1
 
     logger.info(f"Sent {sent_count} confirmation notifications for event '{event_name}'")

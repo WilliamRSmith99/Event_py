@@ -1,8 +1,19 @@
+"""
+Guild configuration — backed by SQLite (guild_configs table).
+
+Replaces the old guild_config.json flat-file approach.
+All reads/writes hit the DB directly; no in-memory cache needed because
+the bot's async single-process nature means SQLite WAL handles concurrency.
+"""
+import json
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Union
-from core.storage import read_json, write_json_atomic
 
-CONFIG_FILE_NAME = "guild_config.json"
+from core.database import execute_one, execute_query, transaction
+from core.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 # ========== Config State Model ==========
 
@@ -21,14 +32,14 @@ class ServerConfigState:
 
     # Notification settings
     notifications_enabled: bool = True
-    default_reminder_minutes: int = 60  # 1 hour before
-    notification_channel: Optional[str] = None  # Channel for server-wide announcements
+    default_reminder_minutes: int = 60
+    notification_channel: Optional[str] = None
 
     # Display settings
-    use_24hr_time: bool = False  # False = 12hr format (default), True = 24hr format
+    use_24hr_time: bool = False
 
     # Bulletin settings
-    bulletin_use_threads: bool = True  # True = use threads (default), False = register button only
+    bulletin_use_threads: bool = True
 
     def __post_init__(self):
         self.admin_roles = self.admin_roles or []
@@ -84,62 +95,89 @@ class ServerConfigState:
         )
 
 
-# ========== In-Memory Store ==========
+# ========== SQLite helpers ==========
 
-def load_all_configs() -> Dict[str, Dict[str, Union[ServerConfigState, Any]]]:
-    try:
-        raw = read_json(CONFIG_FILE_NAME)
-        return {
-            gid: {
-                "config": ServerConfigState.from_dict(guild_data["config"])
-            }
-            for gid, guild_data in raw.get("servers", {}).items()
-        }
-    except FileNotFoundError:
-        return {}
+def _row_to_config(row: dict) -> ServerConfigState:
+    return ServerConfigState(
+        guild_id=row["guild_id"],
+        admin_roles=json.loads(row.get("admin_roles") or "[]"),
+        event_organizer_roles=json.loads(row.get("event_organizer_roles") or "[]"),
+        event_attendee_roles=json.loads(row.get("event_attendee_roles") or "[]"),
+        bulletin_channel=row.get("bulletin_channel"),
+        roles_and_permissions_settings_enabled=bool(row.get("roles_and_permissions_settings_enabled", 1)),
+        bulletin_settings_enabled=bool(row.get("bulletin_settings_enabled", 0)),
+        display_settings_enabled=bool(row.get("display_settings_enabled", 1)),
+        notifications_enabled=bool(row.get("notifications_enabled", 1)),
+        default_reminder_minutes=row.get("default_reminder_minutes", 60),
+        notification_channel=row.get("notification_channel"),
+        use_24hr_time=bool(row.get("use_24hr_time", 0)),
+        bulletin_use_threads=bool(row.get("bulletin_use_threads", 1)),
+    )
 
-config_list: Dict[str, Dict[str, ServerConfigState]] = load_all_configs()
-
-# ========== Save ==========
-
-def save_all_configs(data: Dict[str, Dict[str, ServerConfigState]]) -> None:
-    to_save = {
-        "servers": {
-            gid: {
-                "config": config.to_dict()
-            }
-            for gid, guild_data in data.items()
-            for config in guild_data.values()
-        }
-    }
-    write_json_atomic(CONFIG_FILE_NAME, to_save)
 
 # ========== CRUD ==========
 
 def get_config(guild_id: int) -> ServerConfigState:
     gid = str(guild_id)
-    if gid not in config_list or "config" not in config_list[gid]:
-        config = ServerConfigState(guild_id=gid)
-        config_list[gid] = {"config": config}
-        save_all_configs(config_list)
-    return config_list[gid]["config"]
+    row = execute_one("SELECT * FROM guild_configs WHERE guild_id = ?", (gid,))
+    if row:
+        return _row_to_config(dict(row))
+    # First access — create a default row and return it
+    default = ServerConfigState(guild_id=gid)
+    modify_config(default)
+    return default
+
 
 def modify_config(config: Union[ServerConfigState, Dict[str, Any]]) -> None:
-    guild_id = str(config.guild_id if isinstance(config, ServerConfigState) else config.get("guild_id"))
-
     if isinstance(config, dict):
         config = ServerConfigState.from_dict(config)
 
-    if guild_id not in config_list:
-        config_list[guild_id] = {}
+    gid = str(config.guild_id)
+    with transaction() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO guild_configs (
+                guild_id, admin_roles, event_organizer_roles, event_attendee_roles,
+                bulletin_channel, roles_and_permissions_settings_enabled,
+                bulletin_settings_enabled, display_settings_enabled,
+                notifications_enabled, default_reminder_minutes, notification_channel,
+                use_24hr_time, bulletin_use_threads, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(guild_id) DO UPDATE SET
+                admin_roles = excluded.admin_roles,
+                event_organizer_roles = excluded.event_organizer_roles,
+                event_attendee_roles = excluded.event_attendee_roles,
+                bulletin_channel = excluded.bulletin_channel,
+                roles_and_permissions_settings_enabled = excluded.roles_and_permissions_settings_enabled,
+                bulletin_settings_enabled = excluded.bulletin_settings_enabled,
+                display_settings_enabled = excluded.display_settings_enabled,
+                notifications_enabled = excluded.notifications_enabled,
+                default_reminder_minutes = excluded.default_reminder_minutes,
+                notification_channel = excluded.notification_channel,
+                use_24hr_time = excluded.use_24hr_time,
+                bulletin_use_threads = excluded.bulletin_use_threads,
+                updated_at = datetime('now')
+            """,
+            (
+                gid,
+                json.dumps(config.admin_roles),
+                json.dumps(config.event_organizer_roles),
+                json.dumps(config.event_attendee_roles),
+                config.bulletin_channel,
+                int(config.roles_and_permissions_settings_enabled),
+                int(config.bulletin_settings_enabled),
+                int(config.display_settings_enabled),
+                int(config.notifications_enabled),
+                config.default_reminder_minutes,
+                config.notification_channel,
+                int(config.use_24hr_time),
+                int(config.bulletin_use_threads),
+            ),
+        )
 
-    config_list[guild_id]["config"] = config
-    save_all_configs(config_list)
 
 def delete_config(guild_id: Union[str, int]) -> bool:
-    try:
-        del config_list[str(guild_id)]
-        save_all_configs(config_list)
-        return True
-    except KeyError:
-        return False
+    gid = str(guild_id)
+    with transaction() as cursor:
+        cursor.execute("DELETE FROM guild_configs WHERE guild_id = ?", (gid,))
+        return cursor.rowcount > 0

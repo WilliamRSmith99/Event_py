@@ -2,21 +2,20 @@
 Persistent Availability Memory for Event Bot (Premium Feature).
 
 Remembers users' typical availability patterns across events,
-allowing them to auto-fill availability for new events.
+allowing pre-selection of historically common hours in /register.
+
+Backed by SQLite availability_patterns table (was: availability_memory.json).
 """
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Set
-from collections import defaultdict
+from typing import Dict, List, Any, Optional
 
-from core.storage import read_json, write_json_atomic
+from core.database import execute_one, execute_query, transaction
 from core.logging import get_logger
 from core import entitlements
 from core.entitlements import Feature
 
 logger = get_logger(__name__)
-
-AVAILABILITY_MEMORY_FILE = "availability_memory.json"
 
 
 # =============================================================================
@@ -27,8 +26,8 @@ AVAILABILITY_MEMORY_FILE = "availability_memory.json"
 class TimeSlotPattern:
     """A pattern representing a user's typical availability."""
     day_of_week: int  # 0=Monday, 6=Sunday
-    hour: int  # 0-23
-    count: int = 1  # How many times they've been available at this time
+    hour: int         # 0-23
+    count: int = 1
     last_used: str = field(default_factory=lambda: datetime.utcnow().isoformat())
 
     def to_dict(self) -> Dict[str, Any]:
@@ -57,82 +56,19 @@ class UserAvailabilityMemory:
     patterns: List[TimeSlotPattern] = field(default_factory=list)
     last_updated: str = field(default_factory=lambda: datetime.utcnow().isoformat())
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "user_id": self.user_id,
-            "guild_id": self.guild_id,
-            "patterns": [p.to_dict() for p in self.patterns],
-            "last_updated": self.last_updated,
-        }
-
-    @staticmethod
-    def from_dict(data: Dict[str, Any]) -> "UserAvailabilityMemory":
-        return UserAvailabilityMemory(
-            user_id=data["user_id"],
-            guild_id=data["guild_id"],
-            patterns=[TimeSlotPattern.from_dict(p) for p in data.get("patterns", [])],
-            last_updated=data.get("last_updated", datetime.utcnow().isoformat()),
-        )
-
     def get_pattern(self, day_of_week: int, hour: int) -> Optional[TimeSlotPattern]:
-        """Get a specific pattern if it exists."""
         for pattern in self.patterns:
             if pattern.day_of_week == day_of_week and pattern.hour == hour:
                 return pattern
         return None
-
-    def add_or_update_pattern(self, day_of_week: int, hour: int) -> None:
-        """Add a new pattern or increment an existing one."""
-        existing = self.get_pattern(day_of_week, hour)
-        if existing:
-            existing.count += 1
-            existing.last_used = datetime.utcnow().isoformat()
-        else:
-            self.patterns.append(TimeSlotPattern(
-                day_of_week=day_of_week,
-                hour=hour,
-                count=1,
-            ))
-        self.last_updated = datetime.utcnow().isoformat()
 
     def get_suggested_slots(self, min_count: int = 2) -> List[TimeSlotPattern]:
         """Get slots the user is frequently available at."""
         return sorted(
             [p for p in self.patterns if p.count >= min_count],
             key=lambda p: p.count,
-            reverse=True
+            reverse=True,
         )
-
-
-# =============================================================================
-# Storage Functions
-# =============================================================================
-
-def load_availability_memory() -> Dict[str, Dict[str, UserAvailabilityMemory]]:
-    """Load all availability memory from storage."""
-    try:
-        raw = read_json(AVAILABILITY_MEMORY_FILE)
-        result = {}
-        for guild_id, users in raw.items():
-            result[guild_id] = {
-                user_id: UserAvailabilityMemory.from_dict(data)
-                for user_id, data in users.items()
-            }
-        return result
-    except FileNotFoundError:
-        return {}
-
-
-def save_availability_memory(data: Dict[str, Dict[str, UserAvailabilityMemory]]) -> None:
-    """Save all availability memory to storage."""
-    to_save = {
-        guild_id: {
-            user_id: memory.to_dict()
-            for user_id, memory in users.items()
-        }
-        for guild_id, users in data.items()
-    }
-    write_json_atomic(AVAILABILITY_MEMORY_FILE, to_save)
 
 
 # =============================================================================
@@ -141,23 +77,35 @@ def save_availability_memory(data: Dict[str, Dict[str, UserAvailabilityMemory]])
 
 def get_user_memory(user_id: int, guild_id: int) -> Optional[UserAvailabilityMemory]:
     """
-    Get a user's availability memory for a guild.
-
-    Returns None if the guild doesn't have premium or no memory exists.
+    Get a user's availability patterns for a guild.
+    Returns None if the guild doesn't have premium or no patterns exist.
     """
-    # Check if guild has premium
     if not entitlements.has_feature(guild_id, Feature.PERSISTENT_AVAILABILITY):
         return None
 
-    all_memory = load_availability_memory()
-    guild_memory = all_memory.get(str(guild_id), {})
-    return guild_memory.get(str(user_id))
+    rows = execute_query(
+        "SELECT * FROM availability_patterns WHERE user_id = ? AND guild_id = ?",
+        (str(user_id), str(guild_id)),
+    )
+    if not rows:
+        return None
+
+    patterns = [
+        TimeSlotPattern(
+            day_of_week=r["day_of_week"],
+            hour=r["hour"],
+            count=r["count"],
+            last_used=r["last_used"],
+        )
+        for r in rows
+    ]
+    return UserAvailabilityMemory(user_id=user_id, guild_id=guild_id, patterns=patterns)
 
 
 def record_availability(
     user_id: int,
     guild_id: int,
-    availability_slots: List[datetime]
+    availability_slots: List[datetime],
 ) -> bool:
     """
     Record a user's availability selections to build their pattern.
@@ -168,35 +116,29 @@ def record_availability(
         availability_slots: List of datetime objects the user selected
 
     Returns:
-        True if recorded (premium), False if not recorded (free tier)
+        True if recorded (premium guild), False otherwise.
     """
-    # Check if guild has premium
     if not entitlements.has_feature(guild_id, Feature.PERSISTENT_AVAILABILITY):
         return False
 
-    all_memory = load_availability_memory()
-    guild_key = str(guild_id)
-    user_key = str(user_id)
+    now_iso = datetime.utcnow().isoformat()
+    with transaction() as cursor:
+        for slot in availability_slots:
+            cursor.execute(
+                """
+                INSERT INTO availability_patterns (user_id, guild_id, day_of_week, hour, count, last_used)
+                VALUES (?, ?, ?, ?, 1, ?)
+                ON CONFLICT(user_id, guild_id, day_of_week, hour) DO UPDATE SET
+                    count     = count + 1,
+                    last_used = excluded.last_used
+                """,
+                (str(user_id), str(guild_id), slot.weekday(), slot.hour, now_iso),
+            )
 
-    if guild_key not in all_memory:
-        all_memory[guild_key] = {}
-
-    if user_key not in all_memory[guild_key]:
-        all_memory[guild_key][user_key] = UserAvailabilityMemory(
-            user_id=user_id,
-            guild_id=guild_id,
-        )
-
-    memory = all_memory[guild_key][user_key]
-
-    for slot in availability_slots:
-        memory.add_or_update_pattern(
-            day_of_week=slot.weekday(),
-            hour=slot.hour
-        )
-
-    save_availability_memory(all_memory)
-    logger.info(f"Recorded {len(availability_slots)} availability slots for user {user_id} in guild {guild_id}")
+    logger.info(
+        f"Recorded {len(availability_slots)} availability slots "
+        f"for user {user_id} in guild {guild_id}"
+    )
     return True
 
 
@@ -204,52 +146,33 @@ def get_suggested_availability(
     user_id: int,
     guild_id: int,
     proposed_slots: List[datetime],
-    min_count: int = 2
+    min_count: int = 2,
 ) -> List[datetime]:
     """
-    Get suggested availability based on user's history.
+    Filter proposed_slots to those matching the user's historical patterns.
 
-    Args:
-        user_id: The Discord user ID
-        guild_id: The Discord guild ID
-        proposed_slots: List of proposed datetime slots for the event
-        min_count: Minimum times a slot must have been used to be suggested
-
-    Returns:
-        List of datetime slots the user is typically available at
+    Returns the subset of proposed_slots the user has been available at
+    (same day-of-week + hour) at least min_count times.
     """
     memory = get_user_memory(user_id, guild_id)
     if not memory:
         return []
 
-    suggested_patterns = memory.get_suggested_slots(min_count)
-    if not suggested_patterns:
-        return []
-
-    # Build a set of (day_of_week, hour) tuples for fast lookup
-    pattern_set = {(p.day_of_week, p.hour) for p in suggested_patterns}
-
-    # Filter proposed slots to those matching user's patterns
-    suggested = []
-    for slot in proposed_slots:
-        if (slot.weekday(), slot.hour) in pattern_set:
-            suggested.append(slot)
-
-    return suggested
+    pattern_set = {(p.day_of_week, p.hour) for p in memory.get_suggested_slots(min_count)}
+    return [s for s in proposed_slots if (s.weekday(), s.hour) in pattern_set]
 
 
 def clear_user_memory(user_id: int, guild_id: int) -> bool:
-    """Clear a user's availability memory for a guild."""
-    all_memory = load_availability_memory()
-    guild_key = str(guild_id)
-    user_key = str(user_id)
-
-    if guild_key in all_memory and user_key in all_memory[guild_key]:
-        del all_memory[guild_key][user_key]
-        save_availability_memory(all_memory)
+    """Clear all availability patterns for a user in a guild."""
+    with transaction() as cursor:
+        cursor.execute(
+            "DELETE FROM availability_patterns WHERE user_id = ? AND guild_id = ?",
+            (str(user_id), str(guild_id)),
+        )
+        deleted = cursor.rowcount > 0
+    if deleted:
         logger.info(f"Cleared availability memory for user {user_id} in guild {guild_id}")
-        return True
-    return False
+    return deleted
 
 
 def get_memory_stats(user_id: int, guild_id: int) -> Optional[Dict[str, Any]]:
@@ -273,5 +196,4 @@ def get_memory_stats(user_id: int, guild_id: int) -> Optional[Dict[str, Any]]:
         "total_selections": total_selections,
         "frequent_count": len(frequent_patterns),
         "top_slots": top_slots,
-        "last_updated": memory.last_updated,
     }

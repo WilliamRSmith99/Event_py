@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 DB_PATH = Path(config.DATA_DIR) / "eventbot.db"
 
 # Schema version for migrations
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 # =============================================================================
@@ -385,6 +385,20 @@ def init_database() -> None:
                     logger.info("Migration v3: Added archived_at column to events")
                 except sqlite3.OperationalError:
                     pass  # Column already exists
+
+            if current_version < 4:
+                # Add guild display/bulletin settings missing from initial guild_configs schema
+                for col, default in [
+                    ("use_24hr_time", "0"),
+                    ("bulletin_use_threads", "1"),
+                ]:
+                    try:
+                        cursor.execute(
+                            f"ALTER TABLE guild_configs ADD COLUMN {col} INTEGER DEFAULT {default}"
+                        )
+                        logger.info(f"Migration v4: Added {col} to guild_configs")
+                    except sqlite3.OperationalError:
+                        pass  # Column already exists
 
             cursor.execute(
                 "INSERT INTO schema_version (version) VALUES (?)",
