@@ -475,7 +475,7 @@ class EventRepository:
                 waitlist[slot] = {}
             waitlist[slot][str(r["position"])] = r["user_id"]
 
-        # Get message map
+        # Get message map — keep IDs as strings to match how they're stored and compared
         map_rows = execute_query(
             "SELECT * FROM bulletin_message_map WHERE event_id = ?",
             (event_id,)
@@ -483,11 +483,17 @@ class EventRepository:
         message_map = {}
         for r in map_rows:
             message_map[r["slot_time"]] = {
-                "thread_id": int(r["thread_id"]) if r["thread_id"] else None,
-                "message_id": int(r["message_id"]) if r["message_id"] else None,
+                "thread_id": r["thread_id"],
+                "message_id": r["message_id"],
                 "embed_index": r["embed_index"],
                 "field_name": r["field_name"]
             }
+
+        # Seed availability with all proposed slots so that events with zero
+        # registrations still show their slots (avoids "no times proposed" error)
+        for slot in slots:
+            if slot not in availability:
+                availability[slot] = {}
 
         # Build recurrence config
         recurrence = None

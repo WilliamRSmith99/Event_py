@@ -225,7 +225,7 @@ def generate_single_embed_for_message(event_data, message_id: str) -> discord.Em
     for embed, emoji_map in generate_thread_messages(event_data):
         for emoji, slot in emoji_map.items():
             msg_info = event_data.availability_to_message_map.get(slot)
-            if msg_info and msg_info["message_id"] == message_id:
+            if msg_info and str(msg_info["message_id"]) == message_id:
                 return embed
     return None
 
@@ -464,6 +464,7 @@ async def handle_slot_selection(interaction: discord.Interaction, selected_slot:
         event.availability[selected_slot][next_position] = user_id
         if user_id not in event.rsvp:
             event.rsvp.append(user_id)
+        action_msg = "✅ You're registered for that time slot!"
     else:
         # Unregister user
         max_att = int(event.max_attendees) if event.max_attendees and str(event.max_attendees) != "0" else None
@@ -472,6 +473,7 @@ async def handle_slot_selection(interaction: discord.Interaction, selected_slot:
         event.availability[selected_slot] = updated_queue
         if not events.user_has_any_availability(user_id, event.availability) and user_id in event.rsvp:
             event.rsvp.remove(user_id)
+        action_msg = "❌ You've been unregistered from that time slot."
 
         # Notify anyone promoted off the implicit waitlist
         if max_att:
@@ -488,28 +490,29 @@ async def handle_slot_selection(interaction: discord.Interaction, selected_slot:
 
     events.modify_event(event)
 
-
     # Get message info for this slot
     slot_msg_info = event.availability_to_message_map.get(selected_slot)
     if not slot_msg_info:
-        return await interaction.followup.send("Failed to locate slot message.", ephemeral=True)
+        return await interaction.followup.send(action_msg, ephemeral=True)
 
     thread = interaction.client.get_channel(int(slot_msg_info["thread_id"]))
     message = await thread.fetch_message(int(slot_msg_info["message_id"]))
 
-    # Rebuild embed
-    new_embed = generate_single_embed_for_message(event, str(message.id))
+    # Rebuild embed — IDs are stored as strings in availability_to_message_map
+    message_id_str = str(message.id)
+    new_embed = generate_single_embed_for_message(event, message_id_str)
     if new_embed:
-        # Rebuild the view (button rows) for this embed
         view = ThreadView(event.event_name, [
             (info["embed_index"], slot)
             for slot, info in event.availability_to_message_map.items()
-            if info["message_id"] == str(message.id)
+            if str(info["message_id"]) == message_id_str
         ])
         await message.edit(embed=new_embed, view=view)
 
     # Update main bulletin head message
     await update_bulletin_header(interaction.client, event)
+
+    await interaction.followup.send(action_msg, ephemeral=True)
 
 # ========== Bulletin View ==========
 
@@ -542,13 +545,22 @@ class RegisterSlotButton(Button):
         custom_id = f"register|{self.event_name}|{slot_time}"
         super().__init__(label=self.emoji_icon, style=discord.ButtonStyle.primary, custom_id=custom_id)
 
+
+class ViewAttendeesButton(Button):
+    """View attendees button for non-thread bulletins. Callback handled by on_interaction in bot.py."""
+    def __init__(self, event_name):
+        custom_id = f"view_attendees|{event_name}"
+        super().__init__(label="View Attendees", style=discord.ButtonStyle.secondary, custom_id=custom_id)
+
+
 class BulletinView(View):
     def __init__(self, event_name, show_register: bool = True):
         super().__init__(timeout=None)
-        # Only show Register button when threads are disabled (users need a way to register)
+        # When threads are disabled, show Register + View Attendees buttons
         # When threads are enabled, users register in the thread via slot buttons
         if show_register:
             self.add_item(RegisterButton(event_name))
+            self.add_item(ViewAttendeesButton(event_name))
         self.add_item(NotifyMeButton(event_name))
 
 class ThreadView(View):

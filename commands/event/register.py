@@ -359,12 +359,13 @@ class SubmitAllButton(Button):
                         for msg_id in affected_msg_ids:
                             try:
                                 message = await thread.fetch_message(int(msg_id))
-                                new_embed = bulletins.generate_single_embed_for_message(event_data, str(message.id))
+                                message_id_str = str(message.id)
+                                new_embed = bulletins.generate_single_embed_for_message(event_data, message_id_str)
                                 if new_embed:
                                     bulletin_view = bulletins.ThreadView(event_data.event_name, [
                                         (info["embed_index"], slot)
                                         for slot, info in event_data.availability_to_message_map.items()
-                                        if info["message_id"] == str(message.id)
+                                        if str(info["message_id"]) == message_id_str
                                     ])
                                     await message.edit(embed=new_embed, view=bulletin_view)
                             except discord.NotFound:
