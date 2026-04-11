@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Dict, Any, Union
 from core.storage import read_json, write_json_atomic
-from core import events, conf
+from core import events
 from core.logging import get_logger
 from datetime import datetime, timedelta
 import discord
@@ -333,9 +333,11 @@ async def update_bulletin_header(client: discord.Client, event_data: events.Even
 
         head_msg = await channel.fetch_message(int(event_data.bulletin_message_id))
 
-        # Get server config to check if threads are enabled
-        server_config = conf.get_config(int(event_data.guild_id))
-        use_threads = getattr(server_config, "bulletin_use_threads", True) if server_config else True
+        # Use the mode the bulletin was originally created in, not the current
+        # server setting.  Thread bulletins always have bulletin_thread_id set;
+        # non-thread bulletins leave it None.  This keeps existing bulletins
+        # functional even after the server setting is toggled.
+        use_threads = bool(event_data.bulletin_thread_id)
 
         # Format confirmed date nicely using Discord timestamp
         confirmed_display = "TBD"
