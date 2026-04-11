@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 DB_PATH = Path(config.DATA_DIR) / "eventbot.db"
 
 # Schema version for migrations
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 # =============================================================================
@@ -399,6 +399,23 @@ def init_database() -> None:
                         logger.info(f"Migration v4: Added {col} to guild_configs")
                     except sqlite3.OperationalError:
                         pass  # Column already exists
+
+            if current_version < 5:
+                # Backfill event_slots with ISO timestamps from bulletin_message_map
+                # (thread-bulletin events) and event_availability (registered events).
+                # This makes proposed time slots survive reloads even with zero registrations.
+                try:
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO event_slots (event_id, slot_time)
+                        SELECT event_id, slot_time FROM bulletin_message_map
+                    """)
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO event_slots (event_id, slot_time)
+                        SELECT DISTINCT event_id, slot_time FROM event_availability
+                    """)
+                    logger.info("Migration v5: Backfilled event_slots with ISO timestamps")
+                except Exception as e:
+                    logger.warning(f"Migration v5 backfill warning (non-fatal): {e}")
 
             cursor.execute(
                 "INSERT INTO schema_version (version) VALUES (?)",

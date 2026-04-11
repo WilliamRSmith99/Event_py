@@ -214,12 +214,22 @@ class EventRepository:
 
                 event_id = event.event_id or cursor.lastrowid
 
-                # Insert slots
+                # Insert slots (human-readable labels + ISO availability keys)
+                seen_slots: set = set()
                 for slot in event.slots:
-                    cursor.execute(
-                        "INSERT OR IGNORE INTO event_slots (event_id, slot_time) VALUES (?, ?)",
-                        (event_id, slot)
-                    )
+                    if slot not in seen_slots:
+                        seen_slots.add(slot)
+                        cursor.execute(
+                            "INSERT OR IGNORE INTO event_slots (event_id, slot_time) VALUES (?, ?)",
+                            (event_id, slot)
+                        )
+                for slot_time in event.availability.keys():
+                    if slot_time not in seen_slots:
+                        seen_slots.add(slot_time)
+                        cursor.execute(
+                            "INSERT OR IGNORE INTO event_slots (event_id, slot_time) VALUES (?, ?)",
+                            (event_id, slot_time)
+                        )
 
                 # Insert RSVPs
                 for user_id in event.rsvp:
@@ -330,13 +340,25 @@ class EventRepository:
                     )
                 )
 
-                # Update slots - clear and re-insert
+                # Update slots - clear and re-insert human-readable date labels +
+                # ISO timestamp keys from availability (so they survive reloads
+                # even when no one has registered for them yet).
                 cursor.execute("DELETE FROM event_slots WHERE event_id = ?", (event.event_id,))
+                seen_slots: set = set()
                 for slot in event.slots:
-                    cursor.execute(
-                        "INSERT INTO event_slots (event_id, slot_time) VALUES (?, ?)",
-                        (event.event_id, slot)
-                    )
+                    if slot not in seen_slots:
+                        seen_slots.add(slot)
+                        cursor.execute(
+                            "INSERT INTO event_slots (event_id, slot_time) VALUES (?, ?)",
+                            (event.event_id, slot)
+                        )
+                for slot_time in event.availability.keys():
+                    if slot_time not in seen_slots:
+                        seen_slots.add(slot_time)
+                        cursor.execute(
+                            "INSERT INTO event_slots (event_id, slot_time) VALUES (?, ?)",
+                            (event.event_id, slot_time)
+                        )
 
                 # Update RSVPs - clear and re-insert (dedup by stringifying IDs)
                 cursor.execute("DELETE FROM event_rsvps WHERE event_id = ?", (event.event_id,))
@@ -441,12 +463,21 @@ class EventRepository:
         """Convert a database row to an EventState object."""
         event_id = row["event_id"]
 
-        # Get slots
+        # Get slots — separate ISO timestamps (availability keys) from
+        # human-readable date labels (the date-picker strings like "Thursday, 04/16/26")
         slot_rows = execute_query(
             "SELECT slot_time FROM event_slots WHERE event_id = ?",
             (event_id,)
         )
-        slots = [r["slot_time"] for r in slot_rows]
+        from datetime import datetime as _dt
+        slots: list = []
+        proposed_iso: list = []
+        for r in slot_rows:
+            try:
+                _dt.fromisoformat(r["slot_time"])
+                proposed_iso.append(r["slot_time"])
+            except ValueError:
+                slots.append(r["slot_time"])
 
         # Get RSVPs — normalize to int so membership checks work regardless of DB type
         rsvp_rows = execute_query(
@@ -493,17 +524,11 @@ class EventRepository:
                 "field_name": r["field_name"]
             }
 
-        # Seed availability with all proposed slots that are valid ISO timestamps.
-        # This ensures events with zero registrations still show their time slots.
-        # Non-ISO strings (legacy human-readable dates) are intentionally skipped.
-        for slot in slots:
-            if slot not in availability:
-                try:
-                    from datetime import datetime as _dt
-                    _dt.fromisoformat(slot)
-                    availability[slot] = {}
-                except ValueError:
-                    pass
+        # Seed availability from the ISO timestamps we stored in event_slots.
+        # This restores proposed time slots that have zero registrations.
+        for slot_time in proposed_iso:
+            if slot_time not in availability:
+                availability[slot_time] = {}
 
         # Build recurrence config
         recurrence = None
