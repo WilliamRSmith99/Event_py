@@ -119,30 +119,30 @@ async def schedule_command(interaction: discord.Interaction, event_name: str, ep
 
 async def _toggle_single_slot_registration(interaction: discord.Interaction, event, eph_resp: bool = False):
     """Toggle registration for a confirmed event with a single time slot."""
+    # Defer immediately — DB save + bulletin update can exceed Discord's 3s window
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True)
+
     user_id = interaction.user.id
     confirmed_slot = event.confirmed_date
 
     # Check if user is currently registered for this slot
     slot_availability = event.availability.get(confirmed_slot, {})
     is_registered = user_id in slot_availability.values()
+    max_att = int(event.max_attendees) if event.max_attendees and str(event.max_attendees) != "0" else None
 
     if is_registered:
-        # Unregister user
-        max_att = int(event.max_attendees) if event.max_attendees and str(event.max_attendees) != "0" else None
         old_queue = dict(slot_availability)
         updated_queue = events.remove_user_from_queue(slot_availability, user_id)
         event.availability[confirmed_slot] = updated_queue
-        # Remove from RSVP if no longer has any availability
         if not events.user_has_any_availability(user_id, event.availability) and user_id in event.rsvp:
             event.rsvp.remove(user_id)
         action_msg = f"❌ You have been **unregistered** from **{event.event_name}**."
     else:
-        # Register user
         next_position = str(len(slot_availability) + 1)
         if confirmed_slot not in event.availability:
             event.availability[confirmed_slot] = {}
         event.availability[confirmed_slot][next_position] = user_id
-        # Add to RSVP if not already there
         if user_id not in event.rsvp:
             event.rsvp.append(user_id)
         action_msg = f"✅ You have been **registered** for **{event.event_name}**!"
@@ -165,11 +165,8 @@ async def _toggle_single_slot_registration(interaction: discord.Interaction, eve
     except Exception as e:
         logger.warning(f"Failed to update bulletin: {e}")
 
-    # Send response
-    if eph_resp:
-        await interaction.response.send_message(action_msg, ephemeral=True)
-    else:
-        await utils.safe_send(interaction, action_msg)    
+    # Always use followup since we deferred above
+    await interaction.followup.send(action_msg, ephemeral=True)
 
 class PaginatedHourSelectionView(View):
     def __init__(self, event, slots_data_by_date, user_id, use_24hr: bool = False):
@@ -345,7 +342,12 @@ class SubmitAllButton(Button):
                 event_msg_directory = bulletins.get_event_bulletin(guild_id=event_data.guild_id)
                 if event_data.bulletin_message_id and event_msg_directory.get(f"{event_data.bulletin_message_id}"):
                     event_bulletin_msg = event_msg_directory[f"{event_data.bulletin_message_id}"]
-                    thread = interaction.client.get_channel(int(event_bulletin_msg.thread_id))
+                    # Guard: thread_id may be empty for non-thread bulletins
+                    thread = (
+                        interaction.client.get_channel(int(event_bulletin_msg.thread_id))
+                        if event_bulletin_msg.thread_id
+                        else None
+                    )
 
                     if thread:
                         # Find which message IDs contain the changed slots
@@ -371,8 +373,8 @@ class SubmitAllButton(Button):
                             except discord.NotFound:
                                 logger.warning(f"Bulletin message {msg_id} not found")
 
-                        # Update main bulletin head message
-                        await bulletins.update_bulletin_header(interaction.client, event_data)
+                    # Always update the main bulletin header (thread or not)
+                    await bulletins.update_bulletin_header(interaction.client, event_data)
             except Exception as e:
                 logger.warning(f"Failed to update bulletin: {e}")
 

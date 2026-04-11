@@ -119,6 +119,56 @@ async def grant_trial(interaction: discord.Interaction, days: Optional[int] = 30
 #                        BOT EVENTS
 # ============================================================
 
+async def _handle_view_attendees(interaction: discord.Interaction, event_name: str):
+    """
+    View attendees from a bulletin button.
+    Confirmed events: show only the confirmed slot's attendees.
+    Unconfirmed events: show the full overlap/availability summary.
+    """
+    from datetime import datetime
+    from core import events as core_events, userdata, utils
+    from core.utils import format_time
+
+    event_matches = core_events.get_events(interaction.guild_id, event_name)
+    if not event_matches:
+        await interaction.response.send_message("❌ Event not found.", ephemeral=True)
+        return
+
+    event = list(event_matches.values())[0] if len(event_matches) == 1 else None
+    if not event:
+        # Multiple matches — fall back to overlap summary
+        from commands.event.responses import build_overlap_summary
+        await build_overlap_summary(interaction, event_name, str(interaction.guild_id))
+        return
+
+    if event.confirmed_date and event.confirmed_date != "TBD":
+        # Show only confirmed slot attendees
+        slot_data = event.availability.get(event.confirmed_date, {})
+        user_tz = userdata.get_user_timezone(interaction.user.id) or "UTC"
+        use_24hr = userdata.get_effective_time_format(interaction.user.id, interaction.guild_id)
+
+        import pytz
+        confirmed_dt = datetime.fromisoformat(event.confirmed_date)
+        tz = pytz.timezone(user_tz)
+        local_dt = confirmed_dt.replace(tzinfo=pytz.utc).astimezone(tz)
+        time_str = format_time(local_dt, use_24hr)
+        date_str = local_dt.strftime("%B %d")
+
+        names = []
+        for uid in slot_data.values():
+            member = interaction.guild.get_member(int(uid))
+            names.append(member.display_name if member else f"<@{uid}>")
+
+        content = (
+            f"👥 **Registered for {event.event_name}** ({time_str} on {date_str}):\n"
+            + ("\n".join(f"- {n}" for n in names) if names else "*No registrations yet.*")
+        )
+        await interaction.response.send_message(content, ephemeral=True)
+    else:
+        from commands.event.responses import build_overlap_summary
+        await build_overlap_summary(interaction, event_name, str(interaction.guild_id))
+
+
 async def recurring_event_task():
     """Background task: generates missing recurring event instances every 15 minutes."""
     await client.wait_until_ready()
@@ -180,8 +230,7 @@ async def on_interaction(interaction: discord.Interaction):
         # Format: view_attendees|{event_name}
         if custom_id.startswith("view_attendees|"):
             event_name = custom_id.split("|", 1)[1]
-            from commands.event.responses import build_overlap_summary
-            await build_overlap_summary(interaction, event_name, str(interaction.guild_id))
+            await _handle_view_attendees(interaction, event_name)
             return
 
         # Handle notify button

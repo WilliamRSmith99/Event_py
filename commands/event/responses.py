@@ -72,14 +72,18 @@ class OverlapSummaryButton(Button):
         use_24hr = userdata.get_effective_time_format(interaction.user.id, interaction.guild_id)
         time_str = utils.format_time(local_dt, use_24hr)
 
-        # Determine if the viewer can confirm this slot
+        # Determine if the viewer can confirm this slot.
+        # Hide confirm button if a date is already confirmed.
         event = self.view.event
-        show_confirm = interaction.user.id == event.organizer
-        if not show_confirm:
-            from core.permissions import has_permission, PermissionLevel
-            from core.conf import get_config
-            guild_config = get_config(interaction.guild_id)
-            show_confirm = has_permission(interaction.user, guild_config, PermissionLevel.ADMIN)
+        already_confirmed = bool(event.confirmed_date and event.confirmed_date != "TBD")
+        show_confirm = False
+        if not already_confirmed:
+            show_confirm = interaction.user.id == event.organizer
+            if not show_confirm:
+                from core.permissions import has_permission, PermissionLevel
+                from core.conf import get_config
+                guild_config = get_config(interaction.guild_id)
+                show_confirm = has_permission(interaction.user, guild_config, PermissionLevel.ADMIN)
 
         attendee_view = AttendeeView(self.view, self.datetime_iso, show_confirm=show_confirm)
         await interaction.response.edit_message(

@@ -392,9 +392,23 @@ class EditEventView(utils.ExpiringView):
         await interaction.response.send_modal(modal)
 
     async def _add_slots_callback(self, interaction: discord.Interaction):
-        await interaction.response.send_message(
-            "📅 Adding time slots is not yet implemented. Use `/create` to create a new event with different slots.",
-            ephemeral=True
+        from commands.event.create import GenerateProposedDates
+        # Seed a fresh event-shell with the date picker's 14-day window.
+        # The selected ISO slots will be merged into self.event on completion.
+        shell = events.EventState(
+            guild_id=self.event.guild_id,
+            event_name=self.event.event_name,
+            max_attendees=self.event.max_attendees,
+            organizer=self.event.organizer,
+            organizer_cname=self.event.organizer_cname,
+            confirmed_date=self.event.confirmed_date,
+            slots=GenerateProposedDates(),
+            availability={},
+        )
+        view = AddSlotsDateView(shell, self.event, self.user_tz, self.guild_id, self.user)
+        await interaction.response.edit_message(
+            content=f"📅 **Select new dates to add slots to {self.event.event_name}:**",
+            view=view,
         )
 
     async def _back_callback(self, interaction: discord.Interaction):
@@ -793,3 +807,207 @@ class ConfirmDateView(utils.ExpiringView):
             view=view
         )
         view.message = interaction.message
+
+
+# =============================================================================
+# Add Slots Flow  (Edit dates / Add time slots)
+# =============================================================================
+
+class AddSlotsDateView(utils.ExpiringView):
+    """Date picker for adding new time slots to an existing event."""
+
+    def __init__(self, shell, real_event, user_tz: str, guild_id: int, user):
+        super().__init__(timeout=300)
+        self.shell = shell          # temporary EventState with date picker's slots
+        self.real_event = real_event  # actual event being edited
+        self.user_tz = user_tz
+        self.guild_id = guild_id
+        self.user = user
+        self.selected_dates: set = set()
+        self._render()
+
+    def _render(self):
+        from datetime import datetime as _dt
+        self.clear_items()
+        today = _dt.utcnow().date()
+
+        layout = [self.shell.slots[i:i+5] for i in range(0, len(self.shell.slots), 5)]
+        for row_items in layout:
+            for date_str in row_items:
+                date_obj = _dt.strptime(date_str, "%A, %m/%d/%y").date()
+                is_selected = date_str in self.selected_dates
+                style = discord.ButtonStyle.success if is_selected else discord.ButtonStyle.secondary
+                btn = Button(label=date_str, style=style)
+                btn.disabled = date_obj < today
+                btn.callback = self._make_toggle(date_str)
+                self.add_item(btn)
+
+        submit = Button(label="✔ Select Times", style=discord.ButtonStyle.primary)
+        submit.disabled = not self.selected_dates
+        submit.callback = self._submit
+        self.add_item(submit)
+
+        cancel = Button(label="Cancel", style=discord.ButtonStyle.danger)
+        cancel.callback = self._cancel
+        self.add_item(cancel)
+
+    def _make_toggle(self, date_str: str):
+        async def toggle(interaction: discord.Interaction):
+            if date_str in self.selected_dates:
+                self.selected_dates.remove(date_str)
+            else:
+                self.selected_dates.add(date_str)
+            self._render()
+            await interaction.response.edit_message(view=self)
+        return toggle
+
+    async def _submit(self, interaction: discord.Interaction):
+        from datetime import datetime as _dt
+        sorted_dates = sorted(
+            self.selected_dates,
+            key=lambda d: _dt.strptime(d, "%A, %m/%d/%y"),
+        )
+        view = AddSlotsTimeView(
+            dates=sorted_dates,
+            real_event=self.real_event,
+            user_tz=self.user_tz,
+            guild_id=self.guild_id,
+            user=self.user,
+        )
+        first = sorted_dates[0]
+        await interaction.response.edit_message(
+            content=f"🕐 **Select times to add for {self.real_event.event_name} on {first}:**",
+            view=view,
+        )
+
+    async def _cancel(self, interaction: discord.Interaction):
+        view = ManageEventView(self.real_event, self.user_tz, self.guild_id, self.user)
+        await interaction.response.edit_message(content="", view=view)
+
+
+class AddSlotsTimeView(utils.ExpiringView):
+    """Time picker for one date when adding slots to an existing event."""
+
+    def __init__(self, dates: list, real_event, user_tz: str, guild_id: int, user, date_index: int = 0, current_page: int = 0):
+        super().__init__(timeout=300)
+        self.dates = dates
+        self.real_event = real_event
+        self.user_tz = user_tz
+        self.guild_id = guild_id
+        self.user = user
+        self.date_index = date_index
+        self.current_page = current_page  # 0=AM, 1=PM
+        self.selected_times: set = set()
+        self._render()
+
+    def _render(self):
+        self.clear_items()
+
+        hours = range(0, 12) if self.current_page == 0 else range(12, 24)
+        period = "AM" if self.current_page == 0 else "PM"
+
+        for i, h in enumerate(hours):
+            label = f"{h % 12 or 12}:00 {period}"
+            style = discord.ButtonStyle.success if label in self.selected_times else discord.ButtonStyle.secondary
+            btn = Button(label=label, style=style, row=i // 4)
+            btn.callback = self._make_toggle(label)
+            self.add_item(btn)
+
+        earlier = Button(label="◀ AM", style=discord.ButtonStyle.primary, row=3, disabled=self.current_page == 0)
+        earlier.callback = self._earlier
+        self.add_item(earlier)
+
+        later = Button(label="PM ▶", style=discord.ButtonStyle.primary, row=3, disabled=self.current_page == 1)
+        later.callback = self._later
+        self.add_item(later)
+
+        date_label = self.dates[self.date_index]
+        is_last = self.date_index >= len(self.dates) - 1
+        submit_label = "✔ Finish & Save" if is_last else f"✔ Next: {self.dates[self.date_index + 1]}"
+        submit = Button(label=submit_label, style=discord.ButtonStyle.success, row=4)
+        submit.disabled = not self.selected_times
+        submit.callback = self._submit
+        self.add_item(submit)
+
+        cancel = Button(label="Cancel", style=discord.ButtonStyle.danger, row=4)
+        cancel.callback = self._cancel
+        self.add_item(cancel)
+
+    def _make_toggle(self, label: str):
+        async def toggle(interaction: discord.Interaction):
+            if label in self.selected_times:
+                self.selected_times.remove(label)
+            else:
+                self.selected_times.add(label)
+            self._render()
+            await interaction.response.edit_message(view=self)
+        return toggle
+
+    async def _earlier(self, interaction: discord.Interaction):
+        self.current_page = 0
+        self._render()
+        await interaction.response.edit_message(view=self)
+
+    async def _later(self, interaction: discord.Interaction):
+        self.current_page = 1
+        self._render()
+        await interaction.response.edit_message(view=self)
+
+    async def _submit(self, interaction: discord.Interaction):
+        from core import utils as core_utils, userdata as ud
+        from datetime import datetime as _dt
+
+        date_str = self.dates[self.date_index]
+        user_tz = self.user_tz
+
+        for time_label in self.selected_times:
+            try:
+                datetime_str = f"{date_str} at {time_label}"
+                utc_iso = core_utils.to_utc_isoformat(datetime_str, user_tz)
+                self.real_event.availability[utc_iso] = self.real_event.availability.get(utc_iso, {})
+            except Exception as e:
+                logger.warning(f"Failed to parse datetime {date_str} {time_label}: {e}")
+
+        events.modify_event(self.real_event)
+
+        is_last = self.date_index >= len(self.dates) - 1
+        if is_last:
+            # Update bulletin header if one exists
+            try:
+                from core import bulletins
+                await bulletins.update_bulletin_header(interaction.client, self.real_event)
+            except Exception as e:
+                logger.warning(f"Failed to update bulletin after adding slots: {e}")
+
+            view = ManageEventView(self.real_event, self.user_tz, self.guild_id, self.user)
+            use_24hr = ud.get_effective_time_format(self.user.id, self.guild_id)
+            local_avail = core_utils.from_utc_to_local(self.real_event.availability, self.user_tz)
+            proposed_dates = "\n".join(f"• {d}" for d in group_consecutive_hours_local(local_avail, use_24hr))
+            body = (
+                f"📅 **Event:** `{self.real_event.event_name}`\n"
+                f"🙋 **Organizer:** <@{self.real_event.organizer}>\n"
+                f"✅ **Confirmed Date:** *{self.real_event.confirmed_date or 'TBD'}*\n"
+                f"🗓️ **Proposed Dates (`{self.user_tz}`):**\n{proposed_dates or '*None yet*'}\n"
+            )
+            await interaction.response.edit_message(
+                content=f"✅ **Slots added to {self.real_event.event_name}!**\n\n{body}",
+                view=view,
+            )
+        else:
+            next_date = self.dates[self.date_index + 1]
+            view = AddSlotsTimeView(
+                dates=self.dates,
+                real_event=self.real_event,
+                user_tz=self.user_tz,
+                guild_id=self.guild_id,
+                user=self.user,
+                date_index=self.date_index + 1,
+            )
+            await interaction.response.edit_message(
+                content=f"🕐 **Select times to add for {self.real_event.event_name} on {next_date}:**",
+                view=view,
+            )
+
+    async def _cancel(self, interaction: discord.Interaction):
+        view = ManageEventView(self.real_event, self.user_tz, self.guild_id, self.user)
+        await interaction.response.edit_message(content="", view=view)

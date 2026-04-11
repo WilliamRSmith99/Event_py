@@ -10,7 +10,10 @@ logger = get_logger(__name__)
 
 
 def GenerateProposedDates(target: str = None):
-    today = datetime.now().date()
+    # Use UTC minus 1 day as cutoff so users in UTC-behind timezones
+    # (e.g. US evening) don't see today's date blocked by a server clock
+    # that has already rolled over to tomorrow in UTC.
+    today = (datetime.utcnow() - timedelta(days=1)).date()
 
     if target:
         target_date = datetime.strptime(target, "%m/%d/%y").date()
