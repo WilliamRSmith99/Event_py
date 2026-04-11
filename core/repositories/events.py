@@ -338,13 +338,17 @@ class EventRepository:
                         (event.event_id, slot)
                     )
 
-                # Update RSVPs - clear and re-insert
+                # Update RSVPs - clear and re-insert (dedup by stringifying IDs)
                 cursor.execute("DELETE FROM event_rsvps WHERE event_id = ?", (event.event_id,))
+                seen_rsvp = set()
                 for user_id in event.rsvp:
-                    cursor.execute(
-                        "INSERT INTO event_rsvps (event_id, user_id) VALUES (?, ?)",
-                        (event.event_id, str(user_id))
-                    )
+                    uid_str = str(user_id)
+                    if uid_str not in seen_rsvp:
+                        seen_rsvp.add(uid_str)
+                        cursor.execute(
+                            "INSERT INTO event_rsvps (event_id, user_id) VALUES (?, ?)",
+                            (event.event_id, uid_str)
+                        )
 
                 # Update availability - clear and re-insert
                 cursor.execute("DELETE FROM event_availability WHERE event_id = ?", (event.event_id,))
@@ -444,14 +448,14 @@ class EventRepository:
         )
         slots = [r["slot_time"] for r in slot_rows]
 
-        # Get RSVPs
+        # Get RSVPs — normalize to int so membership checks work regardless of DB type
         rsvp_rows = execute_query(
             "SELECT user_id FROM event_rsvps WHERE event_id = ?",
             (event_id,)
         )
-        rsvp = [r["user_id"] for r in rsvp_rows]
+        rsvp = [int(r["user_id"]) for r in rsvp_rows]
 
-        # Get availability
+        # Get availability — normalize user_ids to int for consistent comparison
         avail_rows = execute_query(
             "SELECT slot_time, user_id, position FROM event_availability WHERE event_id = ?",
             (event_id,)
@@ -461,9 +465,9 @@ class EventRepository:
             slot = r["slot_time"]
             if slot not in availability:
                 availability[slot] = {}
-            availability[slot][str(r["position"])] = r["user_id"]
+            availability[slot][str(r["position"])] = int(r["user_id"])
 
-        # Get waitlist
+        # Get waitlist — normalize user_ids to int
         waitlist_rows = execute_query(
             "SELECT slot_time, user_id, position FROM event_waitlist WHERE event_id = ?",
             (event_id,)
@@ -473,7 +477,7 @@ class EventRepository:
             slot = r["slot_time"]
             if slot not in waitlist:
                 waitlist[slot] = {}
-            waitlist[slot][str(r["position"])] = r["user_id"]
+            waitlist[slot][str(r["position"])] = int(r["user_id"])
 
         # Get message map — keep IDs as strings to match how they're stored and compared
         map_rows = execute_query(
@@ -489,11 +493,17 @@ class EventRepository:
                 "field_name": r["field_name"]
             }
 
-        # Seed availability with all proposed slots so that events with zero
-        # registrations still show their slots (avoids "no times proposed" error)
+        # Seed availability with all proposed slots that are valid ISO timestamps.
+        # This ensures events with zero registrations still show their time slots.
+        # Non-ISO strings (legacy human-readable dates) are intentionally skipped.
         for slot in slots:
             if slot not in availability:
-                availability[slot] = {}
+                try:
+                    from datetime import datetime as _dt
+                    _dt.fromisoformat(slot)
+                    availability[slot] = {}
+                except ValueError:
+                    pass
 
         # Build recurrence config
         recurrence = None
