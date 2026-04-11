@@ -823,7 +823,18 @@ class AddSlotsDateView(utils.ExpiringView):
         self.user_tz = user_tz
         self.guild_id = guild_id
         self.user = user
-        self.selected_dates: set = set()
+        # Pre-highlight dates that already have slots in the real event
+        import pytz
+        from datetime import datetime as _pdt
+        tz = pytz.timezone(user_tz)
+        existing_dates: set = set()
+        for iso in real_event.availability:
+            try:
+                dt = _pdt.fromisoformat(iso).replace(tzinfo=pytz.utc).astimezone(tz)
+                existing_dates.add(dt.strftime("%A, %m/%d/%y"))
+            except ValueError:
+                pass
+        self.selected_dates: set = existing_dates & set(shell.slots)
         self._render()
 
     def _render(self):
@@ -897,7 +908,22 @@ class AddSlotsTimeView(utils.ExpiringView):
         self.user = user
         self.date_index = date_index
         self.current_page = current_page  # 0=AM, 1=PM
-        self.selected_times: set = set()
+
+        # Pre-highlight times already scheduled for this date
+        import pytz
+        from datetime import datetime as _pdt
+        tz = pytz.timezone(user_tz)
+        date_str = dates[date_index]
+        preselected: set = set()
+        for iso in real_event.availability:
+            try:
+                dt = _pdt.fromisoformat(iso).replace(tzinfo=pytz.utc).astimezone(tz)
+                if dt.strftime("%A, %m/%d/%y") == date_str:
+                    period = "AM" if dt.hour < 12 else "PM"
+                    preselected.add(f"{dt.hour % 12 or 12}:00 {period}")
+            except ValueError:
+                pass
+        self.selected_times: set = preselected
         self._render()
 
     def _render(self):
@@ -972,10 +998,12 @@ class AddSlotsTimeView(utils.ExpiringView):
 
         is_last = self.date_index >= len(self.dates) - 1
         if is_last:
-            # Update bulletin header if one exists
             try:
                 from core import bulletins
-                await bulletins.update_bulletin_header(interaction.client, self.real_event)
+                if self.real_event.bulletin_thread_id:
+                    await bulletins.refresh_bulletin_thread(interaction.client, self.real_event)
+                else:
+                    await bulletins.update_bulletin_header(interaction.client, self.real_event)
             except Exception as e:
                 logger.warning(f"Failed to update bulletin after adding slots: {e}")
 

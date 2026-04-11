@@ -407,6 +407,62 @@ async def update_bulletin_header(client: discord.Client, event_data: events.Even
         return False
 
 
+async def refresh_bulletin_thread(client: discord.Client, event_data: events.EventState) -> bool:
+    """
+    Regenerate all thread messages for a thread-mode bulletin so that newly
+    added (or removed) slots are reflected.  Deletes the old slot messages,
+    posts fresh ones for the current availability, and updates
+    availability_to_message_map before saving the event.
+    """
+    if not event_data.bulletin_thread_id:
+        return False
+
+    try:
+        thread = client.get_channel(int(event_data.bulletin_thread_id))
+        if not thread:
+            logger.warning(f"Thread not found: {event_data.bulletin_thread_id}")
+            return False
+
+        # Delete all existing slot messages that we know about
+        for slot_info in event_data.availability_to_message_map.values():
+            try:
+                msg = await thread.fetch_message(int(slot_info["message_id"]))
+                await msg.delete()
+            except discord.NotFound:
+                pass
+            except Exception as e:
+                logger.warning(f"Could not delete old thread message: {e}")
+
+        event_data.availability_to_message_map = {}
+
+        # Post fresh messages for all current slots
+        thread_messages = generate_thread_messages(event_data)
+        slots_to_msg = {}
+        for embed, emoji_map in thread_messages:
+            slot_list = [(emoji, slot) for emoji, slot in emoji_map.items()]
+            view = ThreadView(event_data.event_name, slot_list)
+            thread_msg = await thread.send(embed=embed, view=view)
+            slots_to_msg.update({
+                slot: {
+                    "thread_id": str(thread.id),
+                    "message_id": str(thread_msg.id),
+                    "embed_index": str(emoji),
+                }
+                for emoji, slot in emoji_map.items()
+            })
+
+        event_data.availability_to_message_map = slots_to_msg
+        events.modify_event(event_data)
+
+        await update_bulletin_header(client, event_data)
+        logger.info(f"Refreshed bulletin thread for '{event_data.event_name}'")
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to refresh bulletin thread for '{event_data.event_name}': {e}")
+        return False
+
+
 async def delete_bulletin_message(client: discord.Client, event_data: events.EventState) -> bool:
     """
     Delete the bulletin message and thread for an event.
