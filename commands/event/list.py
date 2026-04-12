@@ -215,9 +215,10 @@ class ViewAttendeesButton(Button):
 
     async def callback(self, interaction: discord.Interaction):
         local_availability = utils.from_utc_to_local( self.event.availability, self.user_tz)
-        view = responses.OverlapSummaryView(self.event, local_availability, self.user_tz, show_back_button=True)
+        use_24hr = userdata.get_effective_time_format(interaction.user.id, interaction.guild_id)
+        view = responses.OverlapSummaryView(self.event, local_availability, self.user_tz, show_back_button=True, use_24hr=use_24hr)
         msg = await interaction.response.edit_message(
-            content=f"📊 Top availability slots for **{self.event.event_name}**",
+            content=view.get_content(),
             view=view
         )
         view.message = msg  # Optional if you want expiry cleanup on info view
