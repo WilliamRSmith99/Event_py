@@ -291,12 +291,10 @@ def handle_checkout_completed(event: Dict[str, Any]) -> bool:
 
     guild_id = int(guild_id)
 
-    # Get subscription details from Stripe
     try:
         subscription = stripe.Subscription.retrieve(subscription_id)
-        current_period_end = datetime.fromtimestamp(subscription.current_period_end)
+        current_period_end = _period_end_from_subscription(subscription)
 
-        # Activate premium
         SubscriptionRepository.activate_premium(
             guild_id=guild_id,
             expires_at=current_period_end,
@@ -339,7 +337,7 @@ def handle_subscription_updated(event: Dict[str, Any]) -> bool:
 
     guild_id = int(guild_id)
 
-    current_period_end = datetime.fromtimestamp(subscription.current_period_end)
+    current_period_end = _period_end_from_subscription(subscription)
     status = subscription.status
 
     if status == "active":
@@ -409,8 +407,14 @@ def handle_invoice_paid(event: Dict[str, Any]) -> bool:
         return True
 
     try:
-        subscription = stripe.Subscription.retrieve(subscription_id)
-        current_period_end = datetime.fromtimestamp(subscription.current_period_end)
+        # invoice.period_end is the end of the billing period for this invoice
+        period_ts = getattr(invoice, 'period_end', None)
+        if not period_ts:
+            # Fall back to retrieving the subscription
+            subscription = stripe.Subscription.retrieve(subscription_id)
+            current_period_end = _period_end_from_subscription(subscription)
+        else:
+            current_period_end = datetime.fromtimestamp(period_ts)
 
         SubscriptionRepository.extend_subscription(sub_info.guild_id, current_period_end)
         logger.info(f"Renewed subscription for guild {sub_info.guild_id} until {current_period_end}")
@@ -448,6 +452,28 @@ def handle_invoice_payment_failed(event: Dict[str, Any]) -> bool:
 # =============================================================================
 # Main Webhook Handler
 # =============================================================================
+
+def _period_end_from_subscription(subscription) -> datetime:
+    """
+    Extract current_period_end from a Stripe Subscription object.
+    Stripe API 2024-09-30+ moved this off the top level onto items[0].period.end.
+    Falls back to 31 days from now if neither location has the value.
+    """
+    # Pre-2024-09-30: top-level field
+    ts = getattr(subscription, 'current_period_end', None)
+    # Post-2024-09-30: lives on the first subscription item's period
+    if not ts:
+        try:
+            ts = subscription.items.data[0].period.end
+        except (AttributeError, IndexError, TypeError):
+            pass
+    if ts:
+        return datetime.fromtimestamp(ts)
+    # Last resort fallback — subscription.updated webhook will correct it
+    logger.warning("Could not read current_period_end from subscription; defaulting to 31 days")
+    from datetime import timedelta
+    return datetime.utcnow() + timedelta(days=31)
+
 
 WEBHOOK_HANDLERS = {
     "checkout.session.completed": handle_checkout_completed,
