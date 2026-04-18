@@ -295,8 +295,11 @@ def handle_checkout_completed(event: Dict[str, Any]) -> bool:
     # invoice.payment_succeeded fires immediately after and will set the real date.
     try:
         plan_str = session.metadata["plan"]
+        print(f"the plan is: {plan_str}")
     except (KeyError, TypeError, AttributeError):
         plan_str = "monthly"
+        print(f"the plan is: {session.metadata}")
+        
 
     from datetime import timedelta
     days = 366 if plan_str == "yearly" else 31
