@@ -277,8 +277,13 @@ def handle_checkout_completed(event: Dict[str, Any]) -> bool:
         True if handled successfully
     """
     session = event.data.object
-    guild_id = (session.metadata or {}).get("guild_id")
+    try:
+        guild_id = session.metadata["guild_id"]
+    except (KeyError, TypeError, AttributeError):
+        guild_id = None
     subscription_id = session.subscription
+    if hasattr(subscription_id, 'id'):  # expanded object, not a string ID
+        subscription_id = subscription_id.id
 
     if not guild_id:
         logger.error("No guild_id in checkout session metadata")
@@ -318,7 +323,10 @@ def handle_subscription_updated(event: Dict[str, Any]) -> bool:
         True if handled successfully
     """
     subscription = event.data.object
-    guild_id = (subscription.metadata or {}).get("guild_id")
+    try:
+        guild_id = subscription.metadata["guild_id"]
+    except (KeyError, TypeError, AttributeError):
+        guild_id = None
 
     if not guild_id:
         # Try to find by subscription ID
@@ -331,15 +339,15 @@ def handle_subscription_updated(event: Dict[str, Any]) -> bool:
 
     guild_id = int(guild_id)
 
-    # Update expiration date
     current_period_end = datetime.fromtimestamp(subscription.current_period_end)
+    status = subscription.status
 
-    if subscription.status == "active":
+    if status == "active":
         SubscriptionRepository.extend_subscription(guild_id, current_period_end)
         logger.info(f"Extended subscription for guild {guild_id} until {current_period_end}")
-    elif subscription.status in ("canceled", "unpaid", "past_due"):
+    elif status in ("canceled", "unpaid", "past_due"):
         SubscriptionRepository.deactivate_premium(guild_id)
-        logger.info(f"Deactivated premium for guild {guild_id} due to status: {subscription.status}")
+        logger.info(f"Deactivated premium for guild {guild_id} due to status: {status}")
 
     return True
 
@@ -355,7 +363,10 @@ def handle_subscription_deleted(event: Dict[str, Any]) -> bool:
         True if handled successfully
     """
     subscription = event.data.object
-    guild_id = (subscription.metadata or {}).get("guild_id")
+    try:
+        guild_id = subscription.metadata["guild_id"]
+    except (KeyError, TypeError, AttributeError):
+        guild_id = None
 
     if not guild_id:
         # Try to find by subscription ID
