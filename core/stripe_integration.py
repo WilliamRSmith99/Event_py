@@ -127,7 +127,7 @@ def get_or_create_customer(
         logger.info(f"Created Stripe customer {customer.id} for guild {guild_id}")
         return customer.id
 
-    except stripe.error.StripeError as e:
+    except stripe.StripeError as e:
         logger.error(f"Failed to create Stripe customer: {e}")
         return None
 
@@ -193,7 +193,7 @@ def create_checkout_session(
         logger.info(f"Created checkout session for guild {guild_id}, plan {plan.value}")
         return session.url
 
-    except stripe.error.StripeError as e:
+    except stripe.StripeError as e:
         logger.error(f"Failed to create checkout session: {e}")
         return None
 
@@ -226,7 +226,7 @@ def create_portal_session(guild_id: int) -> Optional[str]:
         logger.info(f"Created portal session for guild {guild_id}")
         return session.url
 
-    except stripe.error.StripeError as e:
+    except stripe.StripeError as e:
         logger.error(f"Failed to create portal session: {e}")
         return None
 
@@ -258,7 +258,7 @@ def verify_webhook_signature(payload: bytes, signature: str) -> Optional[Dict[st
         )
         return event
 
-    except stripe.error.SignatureVerificationError as e:
+    except stripe.SignatureVerificationError as e:
         logger.error(f"Webhook signature verification failed: {e}")
         return None
     except ValueError as e:
@@ -276,9 +276,9 @@ def handle_checkout_completed(event: Dict[str, Any]) -> bool:
     Returns:
         True if handled successfully
     """
-    session = event["data"]["object"]
-    guild_id = session.get("metadata", {}).get("guild_id")
-    subscription_id = session.get("subscription")
+    session = event.data.object
+    guild_id = (session.metadata or {}).get("guild_id")
+    subscription_id = session.subscription
 
     if not guild_id:
         logger.error("No guild_id in checkout session metadata")
@@ -295,14 +295,14 @@ def handle_checkout_completed(event: Dict[str, Any]) -> bool:
         SubscriptionRepository.activate_premium(
             guild_id=guild_id,
             expires_at=current_period_end,
-            stripe_customer_id=session.get("customer"),
+            stripe_customer_id=session.customer,
             stripe_subscription_id=subscription_id
         )
 
         logger.info(f"Activated premium for guild {guild_id} until {current_period_end}")
         return True
 
-    except stripe.error.StripeError as e:
+    except stripe.StripeError as e:
         logger.error(f"Failed to process checkout completion: {e}")
         return False
 
@@ -317,12 +317,12 @@ def handle_subscription_updated(event: Dict[str, Any]) -> bool:
     Returns:
         True if handled successfully
     """
-    subscription = event["data"]["object"]
-    guild_id = subscription.get("metadata", {}).get("guild_id")
+    subscription = event.data.object
+    guild_id = (subscription.metadata or {}).get("guild_id")
 
     if not guild_id:
         # Try to find by subscription ID
-        sub_info = SubscriptionRepository.get_by_stripe_subscription(subscription["id"])
+        sub_info = SubscriptionRepository.get_by_stripe_subscription(subscription.id)
         if sub_info:
             guild_id = sub_info.guild_id
         else:
@@ -332,14 +332,14 @@ def handle_subscription_updated(event: Dict[str, Any]) -> bool:
     guild_id = int(guild_id)
 
     # Update expiration date
-    current_period_end = datetime.fromtimestamp(subscription["current_period_end"])
+    current_period_end = datetime.fromtimestamp(subscription.current_period_end)
 
-    if subscription["status"] == "active":
+    if subscription.status == "active":
         SubscriptionRepository.extend_subscription(guild_id, current_period_end)
         logger.info(f"Extended subscription for guild {guild_id} until {current_period_end}")
-    elif subscription["status"] in ("canceled", "unpaid", "past_due"):
+    elif subscription.status in ("canceled", "unpaid", "past_due"):
         SubscriptionRepository.deactivate_premium(guild_id)
-        logger.info(f"Deactivated premium for guild {guild_id} due to status: {subscription['status']}")
+        logger.info(f"Deactivated premium for guild {guild_id} due to status: {subscription.status}")
 
     return True
 
@@ -354,12 +354,12 @@ def handle_subscription_deleted(event: Dict[str, Any]) -> bool:
     Returns:
         True if handled successfully
     """
-    subscription = event["data"]["object"]
-    guild_id = subscription.get("metadata", {}).get("guild_id")
+    subscription = event.data.object
+    guild_id = (subscription.metadata or {}).get("guild_id")
 
     if not guild_id:
         # Try to find by subscription ID
-        sub_info = SubscriptionRepository.get_by_stripe_subscription(subscription["id"])
+        sub_info = SubscriptionRepository.get_by_stripe_subscription(subscription.id)
         if sub_info:
             guild_id = sub_info.guild_id
         else:
@@ -385,8 +385,8 @@ def handle_invoice_paid(event: Dict[str, Any]) -> bool:
     Returns:
         True if handled successfully
     """
-    invoice = event["data"]["object"]
-    subscription_id = invoice.get("subscription")
+    invoice = event.data.object
+    subscription_id = invoice.subscription
 
     if not subscription_id:
         return True  # Not a subscription invoice
@@ -404,7 +404,7 @@ def handle_invoice_paid(event: Dict[str, Any]) -> bool:
         SubscriptionRepository.extend_subscription(sub_info.guild_id, current_period_end)
         logger.info(f"Renewed subscription for guild {sub_info.guild_id} until {current_period_end}")
 
-    except stripe.error.StripeError as e:
+    except stripe.StripeError as e:
         logger.error(f"Failed to process invoice payment: {e}")
 
     return True
@@ -420,8 +420,8 @@ def handle_invoice_payment_failed(event: Dict[str, Any]) -> bool:
     Returns:
         True if handled successfully
     """
-    invoice = event["data"]["object"]
-    subscription_id = invoice.get("subscription")
+    invoice = event.data.object
+    subscription_id = invoice.subscription
 
     if not subscription_id:
         return True
@@ -462,7 +462,7 @@ def process_webhook(payload: bytes, signature: str) -> Tuple[bool, str]:
     if not event:
         return False, "Invalid signature"
 
-    event_type = event.get("type")
+    event_type = event.type
     logger.info(f"Processing webhook: {event_type}")
 
     handler = WEBHOOK_HANDLERS.get(event_type)
