@@ -291,23 +291,25 @@ def handle_checkout_completed(event: Dict[str, Any]) -> bool:
 
     guild_id = int(guild_id)
 
+    # Use plan from metadata to set an initial expiry.
+    # invoice.payment_succeeded fires immediately after and will set the real date.
     try:
-        subscription = stripe.Subscription.retrieve(subscription_id)
-        current_period_end = _period_end_from_subscription(subscription)
+        plan_str = session.metadata["plan"]
+    except (KeyError, TypeError, AttributeError):
+        plan_str = "monthly"
 
-        SubscriptionRepository.activate_premium(
-            guild_id=guild_id,
-            expires_at=current_period_end,
-            stripe_customer_id=session.customer,
-            stripe_subscription_id=subscription_id
-        )
+    from datetime import timedelta
+    days = 366 if plan_str == "yearly" else 31
+    initial_expiry = datetime.utcnow() + timedelta(days=days)
 
-        logger.info(f"Activated premium for guild {guild_id} until {current_period_end}")
-        return True
-
-    except stripe.StripeError as e:
-        logger.error(f"Failed to process checkout completion: {e}")
-        return False
+    SubscriptionRepository.activate_premium(
+        guild_id=guild_id,
+        expires_at=initial_expiry,
+        stripe_customer_id=session.customer,
+        stripe_subscription_id=subscription_id,
+    )
+    logger.info(f"Activated premium for guild {guild_id} (initial expiry {initial_expiry}; invoice webhook will correct)")
+    return True
 
 
 def handle_subscription_updated(event: Dict[str, Any]) -> bool:
@@ -384,69 +386,50 @@ def handle_subscription_deleted(event: Dict[str, Any]) -> bool:
     return True
 
 
-def handle_invoice_paid(event: Dict[str, Any]) -> bool:
-    """
-    Handle invoice.paid webhook event (for renewal).
 
-    Args:
-        event: Stripe webhook event
 
-    Returns:
-        True if handled successfully
-    """
+def handle_invoice_payment_failed(event: Dict[str, Any]) -> bool:
     invoice = event.data.object
     subscription_id = invoice.subscription
-
     if not subscription_id:
-        return True  # Not a subscription invoice
+        return True
+    sub_info = SubscriptionRepository.get_by_stripe_subscription(subscription_id)
+    if sub_info:
+        logger.warning(f"Payment failed for guild {sub_info.guild_id}")
+    return True
 
-    # Get subscription to find guild
+
+def _extend_from_invoice(invoice) -> bool:
+    """
+    Shared logic for invoice.paid and invoice.payment_succeeded.
+    Reads period_end directly off the invoice object (reliable across API versions).
+    """
+    subscription_id = invoice.subscription
+    if not subscription_id:
+        return True  # one-time payment, not a subscription
+
     sub_info = SubscriptionRepository.get_by_stripe_subscription(subscription_id)
     if not sub_info:
         logger.warning(f"Cannot find subscription for invoice: {subscription_id}")
         return True
 
-    try:
-        # invoice.period_end is the end of the billing period for this invoice
-        period_ts = getattr(invoice, 'period_end', None)
-        if not period_ts:
-            # Fall back to retrieving the subscription
-            subscription = stripe.Subscription.retrieve(subscription_id)
-            current_period_end = _period_end_from_subscription(subscription)
-        else:
-            current_period_end = datetime.fromtimestamp(period_ts)
-
-        SubscriptionRepository.extend_subscription(sub_info.guild_id, current_period_end)
-        logger.info(f"Renewed subscription for guild {sub_info.guild_id} until {current_period_end}")
-
-    except stripe.StripeError as e:
-        logger.error(f"Failed to process invoice payment: {e}")
-
-    return True
-
-
-def handle_invoice_payment_failed(event: Dict[str, Any]) -> bool:
-    """
-    Handle invoice.payment_failed webhook event.
-
-    Args:
-        event: Stripe webhook event
-
-    Returns:
-        True if handled successfully
-    """
-    invoice = event.data.object
-    subscription_id = invoice.subscription
-
-    if not subscription_id:
+    period_ts = getattr(invoice, 'period_end', None)
+    if not period_ts:
+        logger.warning(f"invoice.period_end missing for subscription {subscription_id}")
         return True
 
-    sub_info = SubscriptionRepository.get_by_stripe_subscription(subscription_id)
-    if sub_info:
-        logger.warning(f"Payment failed for guild {sub_info.guild_id}")
-        # Don't immediately deactivate - Stripe will retry
-
+    current_period_end = datetime.fromtimestamp(period_ts)
+    SubscriptionRepository.extend_subscription(sub_info.guild_id, current_period_end)
+    logger.info(f"Subscription extended for guild {sub_info.guild_id} until {current_period_end}")
     return True
+
+
+def handle_invoice_paid(event: Dict[str, Any]) -> bool:
+    return _extend_from_invoice(event.data.object)
+
+
+def handle_invoice_payment_succeeded(event: Dict[str, Any]) -> bool:
+    return _extend_from_invoice(event.data.object)
 
 
 # =============================================================================
@@ -480,6 +463,7 @@ WEBHOOK_HANDLERS = {
     "customer.subscription.updated": handle_subscription_updated,
     "customer.subscription.deleted": handle_subscription_deleted,
     "invoice.paid": handle_invoice_paid,
+    "invoice.payment_succeeded": handle_invoice_payment_succeeded,
     "invoice.payment_failed": handle_invoice_payment_failed,
 }
 
