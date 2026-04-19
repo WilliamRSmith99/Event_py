@@ -58,7 +58,7 @@ def _build_chart_content(event_name: str, sorted_slots: list, page: int, use_24h
         elif ratio >= 0.40:
             color = "\u001b[33m"   # yellow/amber
         else:
-            color = "\u001b[31m"   # red
+            color = "\u001b[30m"   # grey
         reset = "\u001b[0m"
 
         t_str = utils.format_time(local_dt, use_24hr)
