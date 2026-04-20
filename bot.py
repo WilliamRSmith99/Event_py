@@ -107,14 +107,6 @@ async def subscription(interaction: discord.Interaction):
     """Command to view subscription status (admin only)."""
     await premium.show_subscription_status(interaction)
 
-@tree.command(name="grant_trial", description="Activate a 30-day premium trial for this server (admin only)", guild=guild)
-@app_commands.describe(days="Number of days for the trial (default: 30)")
-async def grant_trial(interaction: discord.Interaction, days: Optional[int] = 30):
-    """Grant a premium trial to the current guild without requiring Stripe."""
-    if not await require_permission(interaction, PermissionLevel.ADMIN):
-        return
-    await premium.grant_trial(interaction, days)
-
 # ============================================================
 #                        BOT EVENTS
 # ============================================================

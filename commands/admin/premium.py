@@ -249,31 +249,6 @@ class SubscriptionStatusView(View):
         return True
 
 
-async def grant_trial(interaction: discord.Interaction, days: int = 30):
-    """Activate a premium trial for the guild without Stripe."""
-    guild_id = interaction.guild_id
-    expires_at = datetime.utcnow() + timedelta(days=days)
-
-    already_premium = entitlements.is_premium(guild_id)
-    success = entitlements.activate_premium(guild_id, expires_at=expires_at)
-
-    if success:
-        expires_ts = f"<t:{int(expires_at.timestamp())}:F>"
-        verb = "extended" if already_premium else "activated"
-        await interaction.response.send_message(
-            f"✨ **Premium trial {verb}!**\n\n"
-            f"This server now has premium access until {expires_ts}.\n"
-            f"All premium features are unlocked.",
-            ephemeral=True
-        )
-        logger.info(f"Trial premium granted to guild {guild_id} for {days} days by {interaction.user.id}")
-    else:
-        await interaction.response.send_message(
-            "❌ Failed to activate trial. Check logs for details.",
-            ephemeral=True
-        )
-
-
 async def show_subscription_status(interaction: discord.Interaction):
     """Show current subscription status (admin only)."""
     guild_id = interaction.guild_id
